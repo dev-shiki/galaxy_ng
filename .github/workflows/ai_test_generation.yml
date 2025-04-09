@@ -20,15 +20,20 @@ on:
         type: boolean
 
 jobs:
-  analyze-coverage:
-    name: Analyze Coverage and Generate Tests
+  # Run the existing test workflow using the workflow_call feature
+  run-tests:
+    uses: ./.github/workflows/ci_full.yml
+
+  generate-tests:
+    name: Generate Tests with AI
     runs-on: ubuntu-latest
+    needs: run-tests
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for better context
+          fetch-depth: 0
       
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -40,41 +45,39 @@ jobs:
           sudo apt update
           sudo apt install -y libsasl2-dev libldap2-dev libssl-dev gettext
       
-      - name: Install requirements
+      - name: Download coverage from test job
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage
+          path: ./
+      
+      - name: Install required packages
         run: |
           python -m pip install --upgrade pip wheel setuptools
-          pip install tox coverage[toml] pytest pytest-cov numpy
-          
-          # Install requirements files
-          for req_file in dev_requirements.txt unittest_requirements.txt lint_requirements.txt; do
-            if [ -f "$req_file" ]; then
-              echo "Installing dependencies from $req_file"
-              pip install -r "$req_file" || echo "Warning: Some packages in $req_file failed to install"
-            fi
-          done
-          
-          # Install the package in development mode
-          pip install -e .
-      
-      - name: Run tests with coverage
-        run: |
-          python -m pytest --cov=galaxy_ng --cov-report=xml:coverage.xml
+          pip install pytest pytest-cov coverage[toml]
       
       - name: Analyze coverage for test candidates
         run: |
           python .github/scripts/coverage_analyzer.py coverage.xml test_candidates.json
       
-      - name: Set up SambaNova API Key
-        run: |
-          echo "SAMBANOVA_API_KEY=${{ secrets.SAMBANOVA_API_KEY }}" >> $GITHUB_ENV
-      
       - name: Generate tests with AI
+        env:
+          SAMBANOVA_API_KEY: ${{ secrets.SAMBANOVA_API_KEY }}
         run: |
           python .github/scripts/ai_test_generator.py \
             --candidates test_candidates.json \
             --limit ${{ github.event.inputs.limit }} \
             --model ${{ github.event.inputs.model }} \
             --output-dir generated_tests
+      
+      - name: Install project for test validation
+        run: |
+          pip install -e .
+          for req_file in dev_requirements.txt unittest_requirements.txt; do
+            if [ -f "$req_file" ]; then
+              pip install -r "$req_file" || echo "Warning: Some packages in $req_file failed to install"
+            fi
+          done
       
       - name: Validate generated tests
         run: |
@@ -87,46 +90,19 @@ jobs:
           path: |
             generated_tests/
             test_candidates.json
-            coverage.xml
           retention-days: 7
       
-      - name: Run full test suite with new tests
-        run: |
-          python -m pytest --cov=galaxy_ng --cov-report=xml:new_coverage.xml
-      
-      - name: Compare coverage results
-        run: |
-          OLD_COVERAGE=$(python -c "import xml.etree.ElementTree as ET; root = ET.parse('coverage.xml').getroot(); print(root.get('line-rate'))")
-          NEW_COVERAGE=$(python -c "import xml.etree.ElementTree as ET; root = ET.parse('new_coverage.xml').getroot(); print(root.get('line-rate'))")
-          
-          OLD_PCT=$(python -c "print(float($OLD_COVERAGE) * 100)")
-          NEW_PCT=$(python -c "print(float($NEW_COVERAGE) * 100)")
-          
-          DIFF=$(python -c "print(float($NEW_PCT) - float($OLD_PCT))")
-          
-          echo "Original coverage: ${OLD_PCT}%"
-          echo "New coverage: ${NEW_PCT}%"
-          echo "Difference: ${DIFF}%"
-          
-          echo "COVERAGE_BEFORE=${OLD_PCT}" >> $GITHUB_ENV
-          echo "COVERAGE_AFTER=${NEW_PCT}" >> $GITHUB_ENV
-          echo "COVERAGE_DIFF=${DIFF}" >> $GITHUB_ENV
-      
       - name: Create PR with Generated Tests
-        if: ${{ github.event.inputs.create_pr == 'true' }}
+        if: ${{ github.event.inputs.create_pr == 'true' && hashFiles('generated_tests/validation_results.json') != '' }}
         uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "AI-Generated tests to improve coverage"
-          title: "AI-Generated Tests (Coverage ${{ env.COVERAGE_BEFORE }}% → ${{ env.COVERAGE_AFTER }}%)"
+          title: "AI-Generated Tests to improve coverage"
           body: |
             This PR contains AI-generated tests to improve code coverage.
             
-            - Original coverage: ${{ env.COVERAGE_BEFORE }}%
-            - New coverage: ${{ env.COVERAGE_AFTER }}%
-            - Improvement: ${{ env.COVERAGE_DIFF }}%
-            
-            Please review the generated tests and make any necessary adjustments.
+            Tests were generated by analyzing modules with low coverage and using SambaNova's AI to create appropriate test cases.
             
             Generated using:
             - Model: ${{ github.event.inputs.model }}
