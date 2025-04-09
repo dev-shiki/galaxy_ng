@@ -5,7 +5,7 @@ set -e
 python -m pip install --upgrade pip setuptools wheel
 
 # Install test dependencies
-pip install tox tox-gh-actions pytest pytest-cov coverage
+pip install tox tox-gh-actions pytest pytest-cov coverage numpy
 
 # Install requirements files if they exist
 for req_file in dev_requirements.txt unittest_requirements.txt lint_requirements.txt; do
