@@ -18,70 +18,11 @@ jobs:
         with:
           fetch-depth: 0
       
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-      
-      - name: Install critical build dependencies
-        run: |
-          python -m pip install --upgrade pip setuptools
-          # Force install wheel to avoid bdist_wheel errors
-          pip install wheel --force-reinstall
-      
-      - name: Skip problematic packages
-        run: |
-          # Create a constraint file to skip problematic packages
-          echo "flake8-quotes==0.0.1" > constraints.txt
-          echo "orionutils==0.0.1" >> constraints.txt
-      
-      - name: Install core dependencies
-        run: |
-          # Install pytest and coverage tools needed for SonarQube
-          pip install pytest pytest-cov
-          
-          # Try to install flake8 directly (without using wheel)
-          pip install --no-binary :all: flake8 || echo "Flake8 installation skipped"
-        continue-on-error: true
-      
-      - name: Attempt requirements installation
-        run: |
-          # Try to install each requirements file with constraints
-          if [ -f unittest_requirements.txt ]; then
-            pip install -c constraints.txt -r unittest_requirements.txt || echo "Some unittest dependencies skipped"
-          fi
-          
-          if [ -f dev_requirements.txt ]; then
-            pip install -c constraints.txt -r dev_requirements.txt || echo "Some dev dependencies skipped"
-          fi
-          
-          # Install the project itself with constraints
-          pip install -c constraints.txt -e . || echo "Project installed with some dependencies skipped"
-        continue-on-error: true
-      
-      - name: Generate coverage data
-        run: |
-          # Try different test approaches
-          python -m pytest --cov=galaxy_ng --cov-report=xml || echo "Tests failed but continuing"
-          
-          # Create coverage file if missing
-          if [ ! -f coverage.xml ]; then
-            echo "<?xml version='1.0' encoding='UTF-8'?><coverage version='1'><sources><source>.</source></sources></coverage>" > coverage.xml
-          fi
-        continue-on-error: true
-      
       - name: Set up JDK 17
         uses: actions/setup-java@v3
         with:
           java-version: 17
           distribution: 'temurin'
-      
-      - name: Cache SonarQube packages
-        uses: actions/cache@v3
-        with:
-          path: ~/.sonar/cache
-          key: ${{ runner.os }}-sonar
-          restore-keys: ${{ runner.os }}-sonar
       
       - name: Run SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@master
@@ -89,8 +30,3 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-        with:
-          args: >
-            -Dsonar.python.coverage.reportPaths=coverage.xml
-            -Dsonar.scm.disabled=false
-            -Dsonar.qualitygate.wait=false
