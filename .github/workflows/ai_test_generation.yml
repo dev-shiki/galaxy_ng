@@ -22,7 +22,7 @@ on:
 jobs:
   # Run the existing test workflow using the workflow_call feature
   run-tests:
-    uses: ./.github/workflows/ci_full.yml
+    uses: ./.github/workflows/test_shiki.yml
 
   generate-tests:
     name: Generate Tests with AI
