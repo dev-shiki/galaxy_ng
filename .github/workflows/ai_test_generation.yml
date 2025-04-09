@@ -1,0 +1,141 @@
+name: AI-Powered Test Generation
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Maximum number of modules to generate tests for'
+        required: false
+        default: '5'
+        type: number
+      model:
+        description: 'SambaNova model to use'
+        required: false
+        default: 'Qwen2.5-Coder-32B-Instruct'
+        type: string
+      create_pr:
+        description: 'Create PR with generated tests'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  analyze-coverage:
+    name: Analyze Coverage and Generate Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better context
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y libsasl2-dev libldap2-dev libssl-dev gettext
+      
+      - name: Install requirements
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          pip install tox coverage[toml] pytest pytest-cov
+          
+          # Install requirements files
+          for req_file in dev_requirements.txt unittest_requirements.txt lint_requirements.txt; do
+            if [ -f "$req_file" ]; then
+              echo "Installing dependencies from $req_file"
+              pip install -r "$req_file" || echo "Warning: Some packages in $req_file failed to install"
+            fi
+          done
+          
+          # Install the package in development mode
+          pip install -e .
+      
+      - name: Run tests with coverage
+        run: |
+          python -m pytest --cov=galaxy_ng --cov-report=xml:coverage.xml
+      
+      - name: Analyze coverage for test candidates
+        run: |
+          python .github/scripts/coverage_analyzer.py coverage.xml test_candidates.json
+      
+      - name: Set up SambaNova API Key
+        run: |
+          echo "SAMBANOVA_API_KEY=${{ secrets.SAMBANOVA_API_KEY }}" >> $GITHUB_ENV
+      
+      - name: Generate tests with AI
+        run: |
+          python .github/scripts/ai_test_generator.py \
+            --candidates test_candidates.json \
+            --limit ${{ github.event.inputs.limit }} \
+            --model ${{ github.event.inputs.model }} \
+            --output-dir generated_tests
+      
+      - name: Validate generated tests
+        run: |
+          python .github/scripts/test_validator.py generated_tests/generation_results.json coverage.xml
+      
+      - name: Upload generated tests as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-tests
+          path: |
+            generated_tests/
+            test_candidates.json
+            coverage.xml
+          retention-days: 7
+      
+      - name: Run full test suite with new tests
+        run: |
+          python -m pytest --cov=galaxy_ng --cov-report=xml:new_coverage.xml
+      
+      - name: Compare coverage results
+        run: |
+          OLD_COVERAGE=$(python -c "import xml.etree.ElementTree as ET; root = ET.parse('coverage.xml').getroot(); print(root.get('line-rate'))")
+          NEW_COVERAGE=$(python -c "import xml.etree.ElementTree as ET; root = ET.parse('new_coverage.xml').getroot(); print(root.get('line-rate'))")
+          
+          OLD_PCT=$(python -c "print(float($OLD_COVERAGE) * 100)")
+          NEW_PCT=$(python -c "print(float($NEW_COVERAGE) * 100)")
+          
+          DIFF=$(python -c "print(float($NEW_PCT) - float($OLD_PCT))")
+          
+          echo "Original coverage: ${OLD_PCT}%"
+          echo "New coverage: ${NEW_PCT}%"
+          echo "Difference: ${DIFF}%"
+          
+          echo "COVERAGE_BEFORE=${OLD_PCT}" >> $GITHUB_ENV
+          echo "COVERAGE_AFTER=${NEW_PCT}" >> $GITHUB_ENV
+          echo "COVERAGE_DIFF=${DIFF}" >> $GITHUB_ENV
+      
+      - name: Create PR with Generated Tests
+        if: ${{ github.event.inputs.create_pr == 'true' }}
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "AI-Generated tests to improve coverage"
+          title: "AI-Generated Tests (Coverage ${{ env.COVERAGE_BEFORE }}% → ${{ env.COVERAGE_AFTER }}%)"
+          body: |
+            This PR contains AI-generated tests to improve code coverage.
+            
+            - Original coverage: ${{ env.COVERAGE_BEFORE }}%
+            - New coverage: ${{ env.COVERAGE_AFTER }}%
+            - Improvement: ${{ env.COVERAGE_DIFF }}%
+            
+            Please review the generated tests and make any necessary adjustments.
+            
+            Generated using:
+            - Model: ${{ github.event.inputs.model }}
+            - Modules analyzed: ${{ github.event.inputs.limit }}
+            
+            No-Issue
+          branch: ai-generated-tests-${{ github.run_id }}
+          base: ${{ github.ref_name }}
+          labels: |
+            ai-generated
+            testing
+            automated-pr
