@@ -93,21 +93,6 @@ jobs:
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
       
-      # SonarCloud is used if CICD_ORG_SONAR_TOKEN_CICD_BOT is defined
-      - name: SonarCloud Scan
-        if: secrets.CICD_ORG_SONAR_TOKEN_CICD_BOT != ''
-        uses: SonarSource/sonarcloud-github-action@master
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.CICD_ORG_SONAR_TOKEN_CICD_BOT }}
-        with:
-          args: >
-            -Dsonar.projectKey=${{ github.repository_owner }}_${{ github.event.repository.name }}
-            -Dsonar.organization=${{ github.repository_owner }}
-            -Dsonar.python.coverage.reportPaths=coverage.xml
-            ${{ github.event_name == 'pull_request' && format('-Dsonar.pullrequest.key={0}', github.event.number) || '' }}
-            ${{ github.event_name == 'pull_request' && format('-Dsonar.pullrequest.branch={0}', github.head_ref) || '' }}
-            ${{ github.event_name == 'pull_request' && format('-Dsonar.pullrequest.base={0}', github.base_ref) || '' }}
       
       # Self-hosted SonarQube is used if SONAR_TOKEN and SONAR_HOST_URL are defined
       - name: Self-hosted SonarQube Scan
