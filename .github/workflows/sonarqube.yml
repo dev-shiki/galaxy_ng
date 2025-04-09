@@ -96,7 +96,6 @@ jobs:
       
       # Self-hosted SonarQube is used if SONAR_TOKEN and SONAR_HOST_URL are defined
       - name: Self-hosted SonarQube Scan
-        if: secrets.SONAR_TOKEN != '' && secrets.SONAR_HOST_URL != ''
         uses: SonarSource/sonarqube-scan-action@master
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
