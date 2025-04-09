@@ -43,7 +43,7 @@ jobs:
       - name: Install requirements
         run: |
           python -m pip install --upgrade pip wheel setuptools
-          pip install tox coverage[toml] pytest pytest-cov
+          pip install tox coverage[toml] pytest pytest-cov numpy
           
           # Install requirements files
           for req_file in dev_requirements.txt unittest_requirements.txt lint_requirements.txt; do
