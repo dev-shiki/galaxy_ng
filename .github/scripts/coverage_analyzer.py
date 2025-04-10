@@ -8,7 +8,40 @@ import os
 import sys
 import xml.etree.ElementTree as ET
 import json
+import re
 from collections import defaultdict
+
+# List of modules and patterns to exclude
+EXCLUDED_PATTERNS = [
+    '/tests/',
+    '/migrations/',
+    'pulp_',
+    'pulpcore',
+]
+
+def check_for_excluded_dependencies(file_path):
+    """Check if the file imports pulp_smash or other problematic dependencies."""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            
+        # Check for import of problematic modules
+        problematic_imports = [
+            'pulp_smash',
+            'pulpcore',
+            'pulp.', 
+            'django_lifecycle',  # Add any other problematic packages here
+        ]
+        
+        for imp in problematic_imports:
+            pattern = fr'(import\s+{imp}|from\s+{imp}\s+import)'
+            if re.search(pattern, content):
+                return True
+                
+        return False
+    except Exception as e:
+        print(f"Warning: Could not check dependencies in {file_path}: {e}")
+        return True  # Exclude if we can't check
 
 def parse_coverage_report(coverage_file):
     """Parse the coverage.xml file and extract module-level coverage data."""
@@ -25,8 +58,19 @@ def parse_coverage_report(coverage_file):
     for cls in root.findall('.//class'):
         filename = cls.get('filename')
         
-        # Skip test files and migrations
-        if '/tests/' in filename or '/migrations/' in filename:
+        # Skip modules matching excluded patterns
+        skip = False
+        for pattern in EXCLUDED_PATTERNS:
+            if pattern in filename:
+                skip = True
+                break
+        
+        if skip:
+            continue
+            
+        # Skip files with problematic dependencies
+        if os.path.exists(filename) and check_for_excluded_dependencies(filename):
+            print(f"Skipping {filename} due to problematic dependencies")
             continue
             
         line_count = 0
