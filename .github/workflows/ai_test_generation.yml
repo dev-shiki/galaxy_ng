@@ -23,11 +23,12 @@ jobs:
   analyze-coverage:
     name: Analyze Coverage and Generate Tests
     runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Fetch all history for all branches and tags (needed for SonarQube)
+          fetch-depth: 0  # Full history for better context
       
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -42,12 +43,15 @@ jobs:
       - name: Install requirements
         run: |
           python -m pip install --upgrade pip wheel setuptools
+          pip install tox coverage[toml]
           
-          # Make install script executable
-          chmod +x .github/scripts/install_test_dependencies.sh
+          # Install additional test requirements
+          if [ -f unittest_requirements.txt ]; then
+            pip install -r unittest_requirements.txt
+          fi
           
-          # Run the comprehensive dependency installation script
-          .github/scripts/install_test_dependencies.sh
+          # Install the package in development mode
+          pip install -e .
       
       - name: Run tests with coverage
         run: |
@@ -64,7 +68,6 @@ jobs:
             echo "<?xml version='1.0' encoding='UTF-8'?><coverage></coverage>" > coverage.xml
           fi
       
-
       - name: Analyze coverage for test candidates
         run: |
           python .github/scripts/coverage_analyzer.py coverage.xml test_candidates.json
@@ -97,38 +100,40 @@ jobs:
       
       - name: Run full test suite with new tests
         run: |
-          #python -m pytest --cov=galaxy_ng --cov-report=xml:new_coverage.xml
-
-          # Run tests with tox
+          # Run tests with tox to include the new tests
           tox --colored yes -e py311 || true
           
-          # If PR number is available, inject it into coverage.xml
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            sed -i '2i <!-- PR ${{ github.event.number }} -->' new_coverage.xml
-          fi
-          
-          # Make sure coverage.xml exists
-          if [ ! -f new_coverage.xml ]; then
-            echo "<?xml version='1.0' encoding='UTF-8'?><new_coverage></new_coverage>" > new_coverage.xml
+          # Make sure new_coverage.xml exists
+          if [ ! -f coverage.xml ]; then
+            cp coverage.xml new_coverage.xml
+          else
+            mv coverage.xml new_coverage.xml
           fi
       
       - name: Compare coverage results
         run: |
-          OLD_COVERAGE=$(python -c "import xml.etree.ElementTree as ET; root = ET.parse('coverage.xml').getroot(); print(root.get('line-rate'))")
-          NEW_COVERAGE=$(python -c "import xml.etree.ElementTree as ET; root = ET.parse('new_coverage.xml').getroot(); print(root.get('line-rate'))")
-          
-          OLD_PCT=$(python -c "print(float($OLD_COVERAGE) * 100)")
-          NEW_PCT=$(python -c "print(float($NEW_COVERAGE) * 100)")
-          
-          DIFF=$(python -c "print(float($NEW_PCT) - float($OLD_PCT))")
-          
-          echo "Original coverage: ${OLD_PCT}%"
-          echo "New coverage: ${NEW_PCT}%"
-          echo "Difference: ${DIFF}%"
-          
-          echo "COVERAGE_BEFORE=${OLD_PCT}" >> $GITHUB_ENV
-          echo "COVERAGE_AFTER=${NEW_PCT}" >> $GITHUB_ENV
-          echo "COVERAGE_DIFF=${DIFF}" >> $GITHUB_ENV
+          if [ -f "coverage.xml" ] && [ -f "new_coverage.xml" ]; then
+            OLD_COVERAGE=$(python -c "import xml.etree.ElementTree as ET; root = ET.parse('coverage.xml').getroot(); print(root.get('line-rate'))")
+            NEW_COVERAGE=$(python -c "import xml.etree.ElementTree as ET; root = ET.parse('new_coverage.xml').getroot(); print(root.get('line-rate'))")
+            
+            OLD_PCT=$(python -c "print(float($OLD_COVERAGE) * 100)")
+            NEW_PCT=$(python -c "print(float($NEW_COVERAGE) * 100)")
+            
+            DIFF=$(python -c "print(float($NEW_PCT) - float($OLD_PCT))")
+            
+            echo "Original coverage: ${OLD_PCT}%"
+            echo "New coverage: ${NEW_PCT}%"
+            echo "Difference: ${DIFF}%"
+            
+            echo "COVERAGE_BEFORE=${OLD_PCT}" >> $GITHUB_ENV
+            echo "COVERAGE_AFTER=${NEW_PCT}" >> $GITHUB_ENV
+            echo "COVERAGE_DIFF=${DIFF}" >> $GITHUB_ENV
+          else
+            echo "COVERAGE_BEFORE=0" >> $GITHUB_ENV
+            echo "COVERAGE_AFTER=0" >> $GITHUB_ENV
+            echo "COVERAGE_DIFF=0" >> $GITHUB_ENV
+            echo "Warning: Coverage files not found for comparison"
+          fi
       
       - name: Create PR with Generated Tests
         if: ${{ github.event.inputs.create_pr == 'true' }}

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-This script validates generated test files by running them with pytest
+This script validates generated test files by running them with tox
 and checking if they improve coverage.
 """
 
@@ -12,13 +12,17 @@ import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-def run_pytest(test_file, pytest_args=None):
-    """Run pytest on a specific test file."""
-    pytest_args = pytest_args or []
-    
-    cmd = ["python", "-m", "pytest", test_file, "-v"] + pytest_args
-    
+def run_tox_test(test_file, env="py311"):
+    """Run a specific test file using tox."""
     try:
+        cmd = [
+            "tox",
+            "-e", env,
+            "--",
+            test_file,
+            "-v"
+        ]
+        
         result = subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
@@ -38,43 +42,17 @@ def run_pytest(test_file, pytest_args=None):
             "error": str(e)
         }
 
-def get_module_coverage(coverage_file, module_path):
-    """Extract coverage for a specific module from coverage.xml."""
-    try:
-        tree = ET.parse(coverage_file)
-        root = tree.getroot()
-        
-        for cls in root.findall('.//class'):
-            if cls.get('filename') == module_path:
-                line_count = 0
-                line_hits = 0
-                
-                for line in cls.findall('./lines/line'):
-                    line_count += 1
-                    if int(line.get('hits', 0)) > 0:
-                        line_hits += 1
-                
-                if line_count > 0:
-                    return {
-                        'line_count': line_count,
-                        'line_hits': line_hits,
-                        'coverage_pct': (line_hits / line_count) * 100
-                    }
-        
-        return None
-    except Exception as e:
-        print(f"Error parsing coverage file: {e}")
-        return None
-
-def run_coverage_for_test(test_file, module_path):
-    """Run coverage analysis for a specific test file and module."""
+def run_tox_coverage(test_file, module_path, env="py311"):
+    """Run coverage analysis for a specific test file using tox."""
     with tempfile.TemporaryDirectory() as tmpdir:
         coverage_file = os.path.join(tmpdir, "coverage.xml")
         
         cmd = [
-            "python", "-m", "pytest", 
-            test_file, 
-            f"--cov={os.path.dirname(module_path)}", 
+            "tox",
+            "-e", env,
+            "--",
+            test_file,
+            f"--cov={os.path.dirname(module_path)}",
             f"--cov-report=xml:{coverage_file}",
             "-v"
         ]
@@ -105,6 +83,34 @@ def run_coverage_for_test(test_file, module_path):
                 "error": str(e)
             }
 
+def get_module_coverage(coverage_file, module_path):
+    """Extract coverage for a specific module from coverage.xml."""
+    try:
+        tree = ET.parse(coverage_file)
+        root = tree.getroot()
+        
+        for cls in root.findall('.//class'):
+            if cls.get('filename') == module_path:
+                line_count = 0
+                line_hits = 0
+                
+                for line in cls.findall('./lines/line'):
+                    line_count += 1
+                    if int(line.get('hits', 0)) > 0:
+                        line_hits += 1
+                
+                if line_count > 0:
+                    return {
+                        'line_count': line_count,
+                        'line_hits': line_hits,
+                        'coverage_pct': (line_hits / line_count) * 100
+                    }
+        
+        return None
+    except Exception as e:
+        print(f"Error parsing coverage file: {e}")
+        return None
+
 def fix_common_issues(test_file, module_path):
     """Fix common issues in generated test files."""
     try:
@@ -119,11 +125,8 @@ def fix_common_issues(test_file, module_path):
             # Fix django settings import if needed
             (r'from django.conf import settings', 'os.environ.setdefault("DJANGO_SETTINGS_MODULE", "galaxy_ng.settings")\nfrom django.conf import settings'),
             
-            # Add a check for Django settings if not present
-            (r'import pytest\n', 'import pytest\n\n# Setup Django settings if not already configured\ntry:\n    from django.conf import settings\n    settings.configure()\nexcept Exception:\n    pass\n'),
-            
             # Add module base path if needed
-            (r'import sys\n', 'import sys\n\n# Add project root to path if needed\nproject_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))\nif project_root not in sys.path:\n    sys.path.insert(0, project_root)\n')
+            (r'import sys\n', 'import sys\n\n# Add project root to path if needed\nproject_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))\nif project_root not in sys.path:\n    sys.path.insert(0, project_root)\n'),
         ]
         
         # Apply fixes
@@ -211,8 +214,8 @@ def main():
             print("Applied fixes to test file")
         
         # Step 2: Run pytest to check if the test runs successfully
-        print("Running pytest...")
-        pytest_result = run_pytest(test_file)
+        print("Running test with tox...")
+        pytest_result = run_tox_test(test_file)
         
         if not pytest_result['success']:
             print(f"Test file failed to run: {test_file}")
@@ -229,7 +232,7 @@ def main():
         
         # Step 3: Run with coverage to see if it improves coverage
         print("Running with coverage analysis...")
-        coverage_result = run_coverage_for_test(test_file, module_path)
+        coverage_result = run_tox_coverage(test_file, module_path)
         
         # Get original coverage for comparison
         original_coverage_data = original_coverage.get(module_path)
