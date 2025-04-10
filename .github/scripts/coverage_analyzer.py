@@ -2,46 +2,14 @@
 """
 This script analyzes a coverage report to identify modules with low coverage
 that would be good candidates for AI-powered test generation.
+Fixed to handle Galaxy NG specific paths correctly.
 """
 
 import os
 import sys
 import xml.etree.ElementTree as ET
 import json
-import re
 from collections import defaultdict
-
-# List of modules and patterns to exclude
-EXCLUDED_PATTERNS = [
-    '/tests/',
-    '/migrations/',
-    'pulp_',
-    'pulpcore',
-]
-
-def check_for_excluded_dependencies(file_path):
-    """Check if the file imports pulp_smash or other problematic dependencies."""
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-            
-        # Check for import of problematic modules
-        problematic_imports = [
-            'pulp_smash',
-            'pulpcore',
-            'pulp.', 
-            'django_lifecycle',  # Add any other problematic packages here
-        ]
-        
-        for imp in problematic_imports:
-            pattern = fr'(import\s+{imp}|from\s+{imp}\s+import)'
-            if re.search(pattern, content):
-                return True
-                
-        return False
-    except Exception as e:
-        print(f"Warning: Could not check dependencies in {file_path}: {e}")
-        return True  # Exclude if we can't check
 
 def parse_coverage_report(coverage_file):
     """Parse the coverage.xml file and extract module-level coverage data."""
@@ -58,19 +26,8 @@ def parse_coverage_report(coverage_file):
     for cls in root.findall('.//class'):
         filename = cls.get('filename')
         
-        # Skip modules matching excluded patterns
-        skip = False
-        for pattern in EXCLUDED_PATTERNS:
-            if pattern in filename:
-                skip = True
-                break
-        
-        if skip:
-            continue
-            
-        # Skip files with problematic dependencies
-        if os.path.exists(filename) and check_for_excluded_dependencies(filename):
-            print(f"Skipping {filename} due to problematic dependencies")
+        # Skip test files and migrations
+        if '/tests/' in filename or '/migrations/' in filename:
             continue
             
         line_count = 0
@@ -93,18 +50,40 @@ def parse_coverage_report(coverage_file):
     
     return coverage_data
 
+def verify_file_exists(filename):
+    """Check if file exists, considering possible prefixes."""
+    # Direct check
+    if os.path.exists(filename):
+        return filename
+        
+    # Check with galaxy_ng prefix if not already prefixed
+    if not filename.startswith('galaxy_ng/'):
+        prefixed_path = os.path.join('galaxy_ng', filename)
+        if os.path.exists(prefixed_path):
+            return prefixed_path
+            
+    # File doesn't exist with any known prefixes
+    return None
+
 def identify_test_candidates(coverage_data, min_lines=10, max_coverage=70):
     """Identify modules that are good candidates for test generation."""
     candidates = []
     
     for filename, data in coverage_data.items():
+        # Check if the file actually exists in the repository
+        actual_path = verify_file_exists(filename)
+        if not actual_path:
+            # Skip files that don't exist in the repository
+            continue
+            
         # We want modules with a reasonable number of lines but low coverage
         if (data['line_count'] >= min_lines and 
             data['coverage_pct'] <= max_coverage and
             data['missing_lines'] >= 5):
             
             candidates.append({
-                'filename': filename,
+                'filename': filename,  # Keep original filename for coverage lookup
+                'actual_path': actual_path,  # Add the verified path
                 'coverage_pct': data['coverage_pct'],
                 'missing_lines': data['missing_lines'],
                 'priority_score': data['missing_lines'] * (100 - data['coverage_pct']) / 100
@@ -134,12 +113,15 @@ def main():
     
     candidates = identify_test_candidates(coverage_data)
     
-    # Limit to top 10 candidates to keep the process manageable
-    top_candidates = candidates[:10]
+    # Skip candidates that don't actually exist in filesystem
+    valid_candidates = [c for c in candidates if c['actual_path']]
+    
+    # Limit to top candidates to keep the process manageable
+    top_candidates = valid_candidates[:10]
     
     print(f"Identified {len(top_candidates)} priority modules for test generation")
     for i, candidate in enumerate(top_candidates, 1):
-        print(f"{i}. {candidate['filename']} - {candidate['coverage_pct']:.2f}% coverage, {candidate['missing_lines']} missing lines")
+        print(f"{i}. {candidate['actual_path']} - {candidate['coverage_pct']:.2f}% coverage, {candidate['missing_lines']} missing lines")
     
     # Write candidates to JSON file
     with open(output_file, 'w') as f:

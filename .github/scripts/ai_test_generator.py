@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 This script uses the SambaNova API to generate test code for modules
-with low test coverage.
+with low test coverage. Fixed to handle Galaxy NG path structure correctly.
 """
 
 import os
@@ -27,40 +27,23 @@ Your task is to analyze the provided code and generate comprehensive pytest test
 4. Follow best practices for pytest and Django testing
 
 The code is from the Galaxy NG project, an Ansible Galaxy server built on Django and Django REST Framework.
-
-Important guidelines for Galaxy NG tests:
-1. Always include proper Django setup at the beginning of test files:
-   ```python
-   import os
-   import sys
-   import django
-   from pathlib import Path
-
-   # Add project root to path
-   project_root = Path(__file__).resolve().parents[2]
-   if str(project_root) not in sys.path:
-       sys.path.insert(0, str(project_root))
-
-   # Configure Django settings
-   os.environ.setdefault("DJANGO_SETTINGS_MODULE", "galaxy_ng.settings")
-   django.setup()
-   ```
-
-2. Use the pytest-django tools where appropriate:
-   - @pytest.mark.django_db for tests that need database access
-   - django_db_setup fixtures
-   - Use factory_boy for model factories if possible
-
-3. Properly mock external services and dependencies:
-   - Use unittest.mock.patch for external services
-   - Use pytest monkeypatch for environment variables
-
-4. For API tests, use APIClient from rest_framework.test
-
-5. Keep test functions focused on testing a single behavior
-
-6. Avoid dependencies on external services like pulp-smash when possible
 """
+
+def fix_module_path(filename):
+    """
+    Fix the module path to match the actual repository structure.
+    Coverage paths like 'app/utils/galaxy.py' should be mapped to 'galaxy_ng/app/utils/galaxy.py'
+    """
+    # List of possible prefix directories based on the repo structure
+    possible_prefixes = ['galaxy_ng/', 'galaxy-operator/']
+    
+    # If path already starts with one of our known directories, return as is
+    for prefix in possible_prefixes:
+        if filename.startswith(prefix):
+            return filename
+    
+    # Default to adding galaxy_ng/ prefix if not already prefixed
+    return os.path.join('galaxy_ng', filename)
 
 def read_file_content(file_path):
     """Read the content of a file."""
@@ -74,9 +57,12 @@ def read_file_content(file_path):
 def get_existing_tests(module_path):
     """Find existing test files for the given module."""
     try:
+        # Ensure we're working with the correct module path
+        fixed_path = fix_module_path(module_path)
+        
         # Determine potential test locations
-        module_dir = os.path.dirname(module_path)
-        module_name = os.path.basename(module_path).replace('.py', '')
+        module_dir = os.path.dirname(fixed_path)
+        module_name = os.path.basename(fixed_path).replace('.py', '')
         
         # Common test file patterns
         test_patterns = [
@@ -120,8 +106,9 @@ def generate_test_with_ai(api_key, module_path, module_content, existing_tests=N
     imports_info = "\n".join(imports) if imports else "No explicit imports found"
     
     # Determine the test file path to generate
-    module_dir = os.path.dirname(module_path)
-    module_name = os.path.basename(module_path).replace('.py', '')
+    fixed_path = fix_module_path(module_path)
+    module_dir = os.path.dirname(fixed_path)
+    module_name = os.path.basename(fixed_path).replace('.py', '')
     test_dir = os.path.join(module_dir, 'tests')
     if not os.path.exists(test_dir):
         test_dir = os.path.join('galaxy_ng', 'tests', module_dir.replace('galaxy_ng/', ''))
@@ -131,7 +118,7 @@ def generate_test_with_ai(api_key, module_path, module_content, existing_tests=N
     # Build user prompt
     user_prompt = f"""I need comprehensive pytest tests for the following Python module from the Galaxy NG project.
 
-MODULE PATH: {module_path}
+MODULE PATH: {fixed_path}
 
 MODULE IMPORTS:
 {imports_info}
@@ -252,8 +239,12 @@ def main():
         filename = candidate['filename']
         print(f"\n[{i}/{len(candidates)}] Processing {filename} (Coverage: {candidate['coverage_pct']:.2f}%)")
         
+        # Fix the path to match repository structure
+        fixed_path = fix_module_path(filename)
+        print(f"Looking for file at: {fixed_path}")
+        
         # Read the module content
-        module_content = read_file_content(filename)
+        module_content = read_file_content(fixed_path)
         if not module_content:
             print(f"Skipping {filename} - could not read file")
             results.append({
@@ -284,8 +275,8 @@ def main():
             continue
         
         # Determine the test file path
-        module_dir = os.path.dirname(filename)
-        module_name = os.path.basename(filename).replace('.py', '')
+        module_dir = os.path.dirname(fixed_path)
+        module_name = os.path.basename(fixed_path).replace('.py', '')
         test_dir = os.path.join(module_dir, 'tests')
         if not os.path.exists(test_dir):
             test_dir = os.path.join('galaxy_ng', 'tests', module_dir.replace('galaxy_ng/', ''))
