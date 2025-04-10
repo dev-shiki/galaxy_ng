@@ -42,18 +42,12 @@ jobs:
       - name: Install requirements
         run: |
           python -m pip install --upgrade pip wheel setuptools
-          pip install tox coverage[toml] numpy
           
-          # Install requirements files that exist
-          for req_file in dev_requirements.txt unittest_requirements.txt lint_requirements.txt; do
-            if [ -f "$req_file" ]; then
-              echo "Installing dependencies from $req_file"
-              pip install -r "$req_file" || echo "Warning: Some packages in $req_file failed to install"
-            fi
-          done
+          # Make install script executable
+          chmod +x .github/scripts/install_test_dependencies.sh
           
-          # Install the package in development mode
-          pip install -e .
+          # Run the comprehensive dependency installation script
+          .github/scripts/install_test_dependencies.sh
       
       - name: Run tests with coverage
         run: |
