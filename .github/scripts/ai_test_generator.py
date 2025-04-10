@@ -27,6 +27,39 @@ Your task is to analyze the provided code and generate comprehensive pytest test
 4. Follow best practices for pytest and Django testing
 
 The code is from the Galaxy NG project, an Ansible Galaxy server built on Django and Django REST Framework.
+
+Important guidelines for Galaxy NG tests:
+1. Always include proper Django setup at the beginning of test files:
+   ```python
+   import os
+   import sys
+   import django
+   from pathlib import Path
+
+   # Add project root to path
+   project_root = Path(__file__).resolve().parents[2]
+   if str(project_root) not in sys.path:
+       sys.path.insert(0, str(project_root))
+
+   # Configure Django settings
+   os.environ.setdefault("DJANGO_SETTINGS_MODULE", "galaxy_ng.settings")
+   django.setup()
+   ```
+
+2. Use the pytest-django tools where appropriate:
+   - @pytest.mark.django_db for tests that need database access
+   - django_db_setup fixtures
+   - Use factory_boy for model factories if possible
+
+3. Properly mock external services and dependencies:
+   - Use unittest.mock.patch for external services
+   - Use pytest monkeypatch for environment variables
+
+4. For API tests, use APIClient from rest_framework.test
+
+5. Keep test functions focused on testing a single behavior
+
+6. Avoid dependencies on external services like pulp-smash when possible
 """
 
 def read_file_content(file_path):
