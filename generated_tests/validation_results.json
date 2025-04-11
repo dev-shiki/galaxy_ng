@@ -1,0 +1,32 @@
+[
+  {
+    "filename": "social/__init__.py",
+    "test_file": "galaxy_ng/tests/social/test___init__.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable"
+  },
+  {
+    "filename": "app/utils/galaxy.py",
+    "test_file": "galaxy_ng/tests/app/utils/test_galaxy.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable"
+  },
+  {
+    "filename": "app/utils/roles.py",
+    "test_file": "galaxy_ng/tests/app/utils/test_roles.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable"
+  },
+  {
+    "filename": "app/access_control/access_policy.py",
+    "test_file": "galaxy_ng/tests/app/access_control/test_access_policy.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable"
+  },
+  {
+    "filename": "app/management/commands/sync-galaxy-collections.py",
+    "test_file": "galaxy_ng/tests/app/management/commands/test_sync-galaxy-collections.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable"
+  }
+]
