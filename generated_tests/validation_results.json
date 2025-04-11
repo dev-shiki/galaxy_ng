@@ -1,0 +1,62 @@
+[
+  {
+    "filename": "social/__init__.py",
+    "test_file": "galaxy_ng/tests/social/test___init__.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable"
+  },
+  {
+    "filename": "app/utils/galaxy.py",
+    "test_file": "galaxy_ng/tests/app/utils/test_galaxy.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable"
+  },
+  {
+    "filename": "app/utils/roles.py",
+    "test_file": "galaxy_ng/tests/app/utils/test_roles.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable"
+  },
+  {
+    "filename": "app/access_control/access_policy.py",
+    "test_file": "galaxy_ng/tests/app/access_control/test_access_policy.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable"
+  },
+  {
+    "filename": "app/management/commands/sync-galaxy-collections.py",
+    "test_file": "galaxy_ng/tests/app/management/commands/test_sync-galaxy-collections.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable"
+  },
+  {
+    "filename": "app/management/commands/galaxy-settings.py",
+    "test_file": "galaxy_ng/tests/app/management/commands/test_galaxy-settings.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable"
+  },
+  {
+    "filename": "app/management/commands/set-repo-keyring.py",
+    "test_file": "galaxy_ng/tests/app/management/commands/test_set-repo-keyring.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable"
+  },
+  {
+    "filename": "app/api/ui/v1/views/search.py",
+    "test_file": "galaxy_ng/tests/app/api/ui/v1/views/test_search.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable"
+  },
+  {
+    "filename": "app/api/v1/serializers.py",
+    "test_file": "galaxy_ng/tests/app/api/v1/test_serializers.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable"
+  },
+  {
+    "filename": "social/pipeline/user.py",
+    "test_file": "galaxy_ng/tests/social/pipeline/test_user.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable"
+  }
+]
