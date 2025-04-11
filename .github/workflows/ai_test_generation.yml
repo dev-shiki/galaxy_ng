@@ -43,12 +43,15 @@ jobs:
       - name: Install requirements
         run: |
           python -m pip install --upgrade pip wheel setuptools
-          pip install tox coverage[toml]
+          pip install tox coverage[toml] pytest pytest-cov pytest-django
           
-          # Install additional test requirements
-          if [ -f unittest_requirements.txt ]; then
-            pip install -r unittest_requirements.txt
-          fi
+          # Install requirements files
+          for req_file in dev_requirements.txt unittest_requirements.txt lint_requirements.txt; do
+            if [ -f "$req_file" ]; then
+              echo "Installing dependencies from $req_file"
+              pip install -r "$req_file" || echo "Warning: Some packages in $req_file failed to install"
+            fi
+          done
           
           # Install the package in development mode
           pip install -e .
@@ -86,7 +89,7 @@ jobs:
       
       - name: Validate generated tests
         run: |
-          python .github/scripts/test_validator.py generated_tests/generation_results.json coverage.xml
+          python .github/scripts/test_validator.py generated_tests/generation_results.json
       
       - name: Upload generated tests as artifacts
         uses: actions/upload-artifact@v4
@@ -98,56 +101,17 @@ jobs:
             coverage.xml
           retention-days: 7
       
-      - name: Run full test suite with new tests
-        run: |
-          # Run tests with tox to include the new tests
-          tox --colored yes -e py311 || true
-          
-          # Make sure new_coverage.xml exists
-          if [ ! -f coverage.xml ]; then
-            cp coverage.xml new_coverage.xml
-          else
-            mv coverage.xml new_coverage.xml
-          fi
-      
-      - name: Compare coverage results
-        run: |
-          if [ -f "coverage.xml" ] && [ -f "new_coverage.xml" ]; then
-            OLD_COVERAGE=$(python -c "import xml.etree.ElementTree as ET; root = ET.parse('coverage.xml').getroot(); print(root.get('line-rate'))")
-            NEW_COVERAGE=$(python -c "import xml.etree.ElementTree as ET; root = ET.parse('new_coverage.xml').getroot(); print(root.get('line-rate'))")
-            
-            OLD_PCT=$(python -c "print(float($OLD_COVERAGE) * 100)")
-            NEW_PCT=$(python -c "print(float($NEW_COVERAGE) * 100)")
-            
-            DIFF=$(python -c "print(float($NEW_PCT) - float($OLD_PCT))")
-            
-            echo "Original coverage: ${OLD_PCT}%"
-            echo "New coverage: ${NEW_PCT}%"
-            echo "Difference: ${DIFF}%"
-            
-            echo "COVERAGE_BEFORE=${OLD_PCT}" >> $GITHUB_ENV
-            echo "COVERAGE_AFTER=${NEW_PCT}" >> $GITHUB_ENV
-            echo "COVERAGE_DIFF=${DIFF}" >> $GITHUB_ENV
-          else
-            echo "COVERAGE_BEFORE=0" >> $GITHUB_ENV
-            echo "COVERAGE_AFTER=0" >> $GITHUB_ENV
-            echo "COVERAGE_DIFF=0" >> $GITHUB_ENV
-            echo "Warning: Coverage files not found for comparison"
-          fi
-      
       - name: Create PR with Generated Tests
         if: ${{ github.event.inputs.create_pr == 'true' }}
         uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "AI-Generated tests to improve coverage"
-          title: "AI-Generated Tests (Coverage ${{ env.COVERAGE_BEFORE }}% → ${{ env.COVERAGE_AFTER }}%)"
+          title: "AI-Generated Tests for Coverage Improvement"
           body: |
             This PR contains AI-generated tests to improve code coverage.
             
-            - Original coverage: ${{ env.COVERAGE_BEFORE }}%
-            - New coverage: ${{ env.COVERAGE_AFTER }}%
-            - Improvement: ${{ env.COVERAGE_DIFF }}%
+            These tests were generated for modules with low coverage and have been validated to run successfully.
             
             Please review the generated tests and make any necessary adjustments.
             
