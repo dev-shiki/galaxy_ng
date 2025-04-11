@@ -11,6 +11,18 @@ import xml.etree.ElementTree as ET
 import json
 from collections import defaultdict
 
+def normalize_path(path):
+    """
+    Normalize path for coverage comparison by handling galaxy_ng prefix.
+    """
+    # Strip galaxy_ng/ prefix if present
+    if path.startswith('galaxy_ng/'):
+        normalized = path[len('galaxy_ng/'):]
+    else:
+        normalized = path
+    
+    return normalized
+
 def parse_coverage_report(coverage_file):
     """Parse the coverage.xml file and extract module-level coverage data."""
     try:
@@ -22,8 +34,12 @@ def parse_coverage_report(coverage_file):
 
     coverage_data = defaultdict(dict)
     
+    # Get all classes in the coverage report
+    all_classes = root.findall('.//class')
+    print(f"Found {len(all_classes)} classes in coverage file")
+    
     # Process each class (module) in the coverage report
-    for cls in root.findall('.//class'):
+    for cls in all_classes:
         filename = cls.get('filename')
         
         # Skip test files and migrations
@@ -41,26 +57,37 @@ def parse_coverage_report(coverage_file):
         
         if line_count > 0:
             coverage_pct = (line_hits / line_count) * 100
+            
+            # Store data with original path
             coverage_data[filename] = {
                 'line_count': line_count,
                 'line_hits': line_hits,
                 'coverage_pct': coverage_pct,
                 'missing_lines': line_count - line_hits
             }
+            
+            # Also store with normalized path for better matching
+            norm_path = normalize_path(filename)
+            coverage_data[norm_path] = {
+                'line_count': line_count,
+                'line_hits': line_hits,
+                'coverage_pct': coverage_pct,
+                'missing_lines': line_count - line_hits,
+                'original_path': filename  # Keep reference to original path
+            }
     
     return coverage_data
 
 def verify_file_exists(filename):
     """Check if file exists, considering possible prefixes."""
-    # Direct check
-    if os.path.exists(filename):
-        return filename
-        
-    # Check with galaxy_ng prefix if not already prefixed
-    if not filename.startswith('galaxy_ng/'):
-        prefixed_path = os.path.join('galaxy_ng', filename)
-        if os.path.exists(prefixed_path):
-            return prefixed_path
+    possible_paths = [
+        filename,
+        f"galaxy_ng/{filename}",
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            return path
             
     # File doesn't exist with any known prefixes
     return None
@@ -70,11 +97,19 @@ def identify_test_candidates(coverage_data, min_lines=10, max_coverage=70):
     candidates = []
     
     for filename, data in coverage_data.items():
+        # Skip normalized duplicates that have an original_path
+        if 'original_path' in data:
+            continue
+            
         # Check if the file actually exists in the repository
         actual_path = verify_file_exists(filename)
         if not actual_path:
-            # Skip files that don't exist in the repository
-            continue
+            # Try checking normalized path if original doesn't exist
+            norm_path = normalize_path(filename)
+            actual_path = verify_file_exists(norm_path)
+            if not actual_path:
+                # Skip files that don't exist in the repository
+                continue
             
         # We want modules with a reasonable number of lines but low coverage
         if (data['line_count'] >= min_lines and 
@@ -115,6 +150,12 @@ def main():
     
     # Skip candidates that don't actually exist in filesystem
     valid_candidates = [c for c in candidates if c['actual_path']]
+    
+    if not valid_candidates:
+        print("WARNING: No valid candidates found. Are the paths in the coverage file correct?")
+        # Print some sample paths from coverage data for debugging
+        sample_paths = list(coverage_data.keys())[:10]
+        print(f"Sample paths from coverage file: {sample_paths}")
     
     # Limit to top candidates to keep the process manageable
     top_candidates = valid_candidates[:10]
