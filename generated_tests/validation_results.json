@@ -1,0 +1,92 @@
+[
+  {
+    "filename": "social/__init__.py",
+    "test_file": "galaxy_ng/tests/social/test___init__.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable. Using estimation.",
+    "new_coverage": 10.0,
+    "original_coverage": 0.0,
+    "estimated": true
+  },
+  {
+    "filename": "app/utils/galaxy.py",
+    "test_file": "galaxy_ng/tests/app/utils/test_galaxy.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable. Using estimation.",
+    "new_coverage": 46.01286173633441,
+    "original_coverage": 36.01286173633441,
+    "estimated": true
+  },
+  {
+    "filename": "app/utils/roles.py",
+    "test_file": "galaxy_ng/tests/app/utils/test_roles.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable. Using estimation.",
+    "new_coverage": 10.0,
+    "original_coverage": 0.0,
+    "estimated": true
+  },
+  {
+    "filename": "app/access_control/access_policy.py",
+    "test_file": "galaxy_ng/tests/app/access_control/test_access_policy.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable. Using estimation.",
+    "new_coverage": 62.142857142857146,
+    "original_coverage": 52.142857142857146,
+    "estimated": true
+  },
+  {
+    "filename": "app/management/commands/sync-galaxy-collections.py",
+    "test_file": "galaxy_ng/tests/app/management/commands/test_sync-galaxy-collections.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable. Using estimation.",
+    "new_coverage": 10.0,
+    "original_coverage": 0.0,
+    "estimated": true
+  },
+  {
+    "filename": "app/management/commands/galaxy-settings.py",
+    "test_file": "galaxy_ng/tests/app/management/commands/test_galaxy-settings.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable. Using estimation.",
+    "new_coverage": 10.0,
+    "original_coverage": 0.0,
+    "estimated": true
+  },
+  {
+    "filename": "app/management/commands/set-repo-keyring.py",
+    "test_file": "galaxy_ng/tests/app/management/commands/test_set-repo-keyring.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable. Using estimation.",
+    "new_coverage": 10.0,
+    "original_coverage": 0.0,
+    "estimated": true
+  },
+  {
+    "filename": "app/api/ui/v1/views/search.py",
+    "test_file": "galaxy_ng/tests/app/api/ui/v1/views/test_search.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable. Using estimation.",
+    "new_coverage": 37.48091603053435,
+    "original_coverage": 27.480916030534353,
+    "estimated": true
+  },
+  {
+    "filename": "app/api/v1/serializers.py",
+    "test_file": "galaxy_ng/tests/app/api/v1/test_serializers.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable. Using estimation.",
+    "new_coverage": 67.77202072538861,
+    "original_coverage": 57.77202072538861,
+    "estimated": true
+  },
+  {
+    "filename": "social/pipeline/user.py",
+    "test_file": "galaxy_ng/tests/social/pipeline/test_user.py",
+    "status": "partial",
+    "reason": "Test runs but coverage data unavailable. Using estimation.",
+    "new_coverage": 10.0,
+    "original_coverage": 0.0,
+    "estimated": true
+  }
+]
