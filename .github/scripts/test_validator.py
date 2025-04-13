@@ -54,6 +54,7 @@ def run_tox_coverage(test_file, module_path, env="py311"):
     """Run coverage analysis for a specific test file using tox."""
     # Create a persistent temp directory
     temp_dir = tempfile.mkdtemp(prefix="galaxy_ng_test_")
+    root_coverage_file = "coverage.xml"
     
     try:
         coverage_file = os.path.join(temp_dir, "coverage.xml")
@@ -88,7 +89,10 @@ def run_tox_coverage(test_file, module_path, env="py311"):
         # Save the full output for debugging
         with open(os.path.join(temp_dir, "tox_output.txt"), "w") as f:
             f.write(f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}")
-        
+
+        if not os.path.exists(coverage_file) and os.path.exists(root_coverage_file):
+             shutil.copy2(root_coverage_file, coverage_file)
+             
         # Check if coverage file was generated
         if os.path.exists(coverage_file):
             print(f"Coverage file generated at: {coverage_file}")
@@ -113,6 +117,7 @@ def run_tox_coverage(test_file, module_path, env="py311"):
                 "coverage": coverage_data,
                 "coverage_file": backup_file
             }
+
         else:
             print(f"WARNING: No coverage file generated at {coverage_file}")
             return {
