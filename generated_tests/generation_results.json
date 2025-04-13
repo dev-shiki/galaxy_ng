@@ -1,0 +1,32 @@
+[
+  {
+    "filename": "social/__init__.py",
+    "status": "success",
+    "test_file": "galaxy_ng/tests/social/test___init__.py",
+    "reference_file": "generated_tests/test_social___init__.py"
+  },
+  {
+    "filename": "app/utils/galaxy.py",
+    "status": "success",
+    "test_file": "galaxy_ng/tests/app/utils/test_galaxy.py",
+    "reference_file": "generated_tests/test_app_utils_galaxy.py"
+  },
+  {
+    "filename": "app/utils/roles.py",
+    "status": "success",
+    "test_file": "galaxy_ng/tests/app/utils/test_roles.py",
+    "reference_file": "generated_tests/test_app_utils_roles.py"
+  },
+  {
+    "filename": "app/access_control/access_policy.py",
+    "status": "success",
+    "test_file": "galaxy_ng/tests/app/access_control/test_access_policy.py",
+    "reference_file": "generated_tests/test_app_access_control_access_policy.py"
+  },
+  {
+    "filename": "app/management/commands/sync-galaxy-collections.py",
+    "status": "success",
+    "test_file": "galaxy_ng/tests/app/management/commands/test_sync-galaxy-collections.py",
+    "reference_file": "generated_tests/test_app_management_commands_sync-galaxy-collections.py"
+  }
+]
