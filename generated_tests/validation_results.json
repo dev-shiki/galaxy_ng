@@ -1,0 +1,65 @@
+[
+  {
+    "filename": "social/__init__.py",
+    "test_file": "galaxy_ng/tests/social/test___init__.py",
+    "status": "unchanged",
+    "reason": "Coverage unchanged",
+    "new_coverage": 0.0,
+    "original_coverage": 0.0,
+    "coverage_change": 0.0
+  },
+  {
+    "filename": "app/utils/galaxy.py",
+    "test_file": "galaxy_ng/tests/app/utils/test_galaxy.py",
+    "status": "unchanged",
+    "reason": "Coverage unchanged",
+    "new_coverage": 36.01286173633441,
+    "original_coverage": 36.01286173633441,
+    "coverage_change": 0.0
+  },
+  {
+    "filename": "app/utils/roles.py",
+    "test_file": "galaxy_ng/tests/app/utils/test_roles.py",
+    "status": "unchanged",
+    "reason": "Coverage unchanged",
+    "new_coverage": 0.0,
+    "original_coverage": 0.0,
+    "coverage_change": 0.0
+  },
+  {
+    "filename": "app/access_control/access_policy.py",
+    "test_file": "galaxy_ng/tests/app/access_control/test_access_policy.py",
+    "status": "unchanged",
+    "reason": "Coverage unchanged",
+    "new_coverage": 52.142857142857146,
+    "original_coverage": 52.142857142857146,
+    "coverage_change": 0.0
+  },
+  {
+    "filename": "app/management/commands/sync-galaxy-collections.py",
+    "test_file": "galaxy_ng/tests/app/management/commands/test_sync-galaxy-collections.py",
+    "status": "unchanged",
+    "reason": "Coverage unchanged",
+    "new_coverage": 0.0,
+    "original_coverage": 0.0,
+    "coverage_change": 0.0
+  },
+  {
+    "filename": "app/management/commands/galaxy-settings.py",
+    "test_file": "galaxy_ng/tests/app/management/commands/test_galaxy-settings.py",
+    "status": "unchanged",
+    "reason": "Coverage unchanged",
+    "new_coverage": 0.0,
+    "original_coverage": 0.0,
+    "coverage_change": 0.0
+  },
+  {
+    "filename": "app/management/commands/set-repo-keyring.py",
+    "test_file": "galaxy_ng/tests/app/management/commands/test_set-repo-keyring.py",
+    "status": "unchanged",
+    "reason": "Coverage unchanged",
+    "new_coverage": 0.0,
+    "original_coverage": 0.0,
+    "coverage_change": 0.0
+  }
+]
