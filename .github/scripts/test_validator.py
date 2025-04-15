@@ -14,6 +14,82 @@ import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+def install_test_dependencies():
+    """Install common dependencies needed for tests."""
+    print("Installing required test dependencies...")
+    try:
+        # Install basic test dependencies
+        deps = [
+            "numpy",
+            "pandas",
+            "django",
+            "pytest-django",
+            "pytest-mock",
+            "coverage",
+            "pytest-cov"
+        ]
+        
+        # Check if unittest_requirements.txt exists and install from it
+        if os.path.exists("unittest_requirements.txt"):
+            print("Installing from unittest_requirements.txt...")
+            subprocess.run(
+                ["pip", "install", "-r", "unittest_requirements.txt"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False
+            )
+        else:
+            print("Installing standard dependencies...")
+            subprocess.run(
+                ["pip", "install"] + deps,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False
+            )
+        
+        # Try to install the project in development mode if setup.py exists
+        if os.path.exists("setup.py"):
+            print("Installing project in development mode...")
+            subprocess.run(
+                ["pip", "install", "-e", "."],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False
+            )
+            
+        print("Dependencies installed")
+        return True
+    except Exception as e:
+        print(f"Warning: Failed to install dependencies: {e}")
+        return False
+
+def setup_test_environment():
+    """Setup environment variables and dependencies for tests."""
+    # Set environment variables
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "galaxy_ng.settings")
+    
+    # Install dependencies
+    install_test_dependencies()
+    
+    # Create pytest.ini if it doesn't exist
+    if not os.path.exists("pytest.ini"):
+        with open("pytest.ini", "w") as f:
+            f.write("""[pytest]
+DJANGO_SETTINGS_MODULE = galaxy_ng.settings
+django_find_project = false
+python_files = test_*.py
+python_classes = Test*
+python_functions = test_*
+markers =
+    deployment_standalone: marks tests to run in standalone mode
+    deployment_community: marks tests to run in community mode
+    deployment_cloud: marks tests to run in cloud/insights mode
+    skip_if_ci: marks tests that should be skipped in CI
+""")
+        print("Created pytest.ini for test configuration")
+    
+    return True
+
 def copy_file_to_temp(source, dest_dir):
     """Copy file to temp directory to preserve it."""
     filename = os.path.basename(source)
@@ -50,6 +126,9 @@ def copy_test_to_unit_directory(test_file):
 def run_pytest_test(test_file):
     """Run a test file directly with pytest for validation."""
     try:
+        # First install required dependencies
+        install_test_dependencies()
+        
         # First attempt with minimal flags for speed
         cmd = [
             "python", "-m", "pytest",
@@ -59,12 +138,18 @@ def run_pytest_test(test_file):
         
         print(f"Running pytest validation: {' '.join(cmd)}")
         
+        # Setup environment variables
+        env_vars = dict(os.environ)
+        env_vars["DJANGO_SETTINGS_MODULE"] = "galaxy_ng.settings"
+        env_vars["PYTHONPATH"] = os.getcwd()
+        
         result = subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            check=False
+            check=False,
+            env=env_vars
         )
         
         return {
@@ -123,16 +208,28 @@ def run_coverage_test(test_file, module_path):
         else:
             module_dir = os.path.dirname(f"galaxy_ng/{module_path}")
         
-        # Try first with pytest
+        # If there's no --cov module, fallback to the test file directory
+        if not module_dir or module_dir == '.':
+            module_dir = os.path.dirname(test_file)
+            
+        # Make sure module_dir is not empty
+        if not module_dir or module_dir == '.':
+            module_dir = 'galaxy_ng'
+            
+        # Try first with pytest using simpler approach for better compatibility
         cmd = [
             "python", "-m", "pytest",
             test_file,
-            f"--cov={module_dir}",
+            "--cov",  # Just collect coverage for everything
             f"--cov-report=xml:{coverage_file}",
             "-v"
         ]
         
         print(f"Running coverage with pytest: {' '.join(cmd)}")
+        
+        env_vars = dict(os.environ)
+        env_vars["DJANGO_SETTINGS_MODULE"] = "galaxy_ng.settings"
+        env_vars["PYTHONPATH"] = os.getcwd()
         
         result = subprocess.run(
             cmd,
@@ -140,7 +237,7 @@ def run_coverage_test(test_file, module_path):
             stderr=subprocess.PIPE,
             text=True,
             check=False,
-            env=dict(os.environ, DJANGO_SETTINGS_MODULE="galaxy_ng.settings")
+            env=env_vars
         )
         
         # Save the output for debugging
@@ -440,6 +537,9 @@ def main():
     if len(sys.argv) < 2:
         print("Usage: python test_validator.py path/to/generation_results.json [path/to/original_coverage.xml]")
         sys.exit(1)
+    
+    # Setup test environment
+    setup_test_environment()
     
     results_file = sys.argv[1]
     original_coverage_file = sys.argv[2] if len(sys.argv) > 2 else None
