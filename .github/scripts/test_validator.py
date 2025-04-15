@@ -151,7 +151,17 @@ def run_tox_coverage(test_file, module_path, env="py311"):
         else:
             module_dir = os.path.dirname(f"galaxy_ng/{module_path}")
         
-        # Run tox with coverage for the specific test
+        # Enhance coverage command with more specific source
+        module_import_path = module_path.replace('/', '.').replace('.py', '')
+        if not module_import_path.startswith('galaxy_ng.'):
+            module_import_path = f'galaxy_ng.{module_import_path}'
+            
+        # Fix module path for coverage
+        module_path_fixed = module_path
+        if not module_path_fixed.startswith('galaxy_ng/'):
+            module_path_fixed = f'galaxy_ng/{module_path}'
+        
+        # Run tox with more specific coverage parameters
         cmd = [
             "tox",
             "-e", env,
@@ -159,6 +169,7 @@ def run_tox_coverage(test_file, module_path, env="py311"):
             test_file,
             f"--cov={module_dir}",
             f"--cov-report=xml:{coverage_file}",
+            "--no-cov-on-fail",
             "-v"
         ]
         
@@ -175,6 +186,35 @@ def run_tox_coverage(test_file, module_path, env="py311"):
         # Save the full output for debugging
         with open(os.path.join(temp_dir, "tox_output.txt"), "w") as f:
             f.write(f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}")
+        
+        # If no coverage file generated, try running with pytest directly
+        if not os.path.exists(coverage_file):
+            print(f"Coverage file not generated with tox, trying pytest directly...")
+            
+            # Run pytest with coverage
+            pytest_cmd = [
+                "python", "-m", "pytest",
+                test_file,
+                f"--cov={module_path_fixed}",
+                f"--cov-report=xml:{coverage_file}",
+                "--no-cov-on-fail",
+                "-v"
+            ]
+            
+            print(f"Running: {' '.join(pytest_cmd)}")
+            
+            pytest_result = subprocess.run(
+                pytest_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                env=dict(os.environ, PYTHONPATH=os.getcwd())
+            )
+            
+            # Save pytest output
+            with open(os.path.join(temp_dir, "pytest_output.txt"), "w") as f:
+                f.write(f"STDOUT:\n{pytest_result.stdout}\n\nSTDERR:\n{pytest_result.stderr}")
         
         # Check if coverage file was generated
         if os.path.exists(coverage_file):
@@ -356,22 +396,47 @@ def fix_common_issues(test_file, module_path):
         
         # List of common fixes to apply
         fixes = [
-            # Fix missing or incorrect imports
-            (r'import pytest\n', 'import pytest\nimport os\nimport sys\n'),
+            # Make sure Django environment is properly set up
+            (r'import pytest\n', '''import os
+import sys
+import pytest
+from unittest import mock
+
+# Setup Django environment
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'galaxy_ng.settings')
+# Add project root to path if needed
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+import django
+django.setup()
+
+'''),
             
-            # Fix django settings import if needed
-            (r'from django.conf import settings', 'os.environ.setdefault("DJANGO_SETTINGS_MODULE", "galaxy_ng.settings")\nfrom django.conf import settings'),
+            # Ensure proper Django database handling
+            (r'django.setup\(\)', '''django.setup()
+
+# Use pytest marks for Django database handling
+pytestmark = pytest.mark.django_db'''),
             
-            # Add module base path if needed
-            (r'import sys\n', 'import sys\n\n# Add project root to path if needed\nproject_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))\nif project_root not in sys.path:\n    sys.path.insert(0, project_root)\n'),
+            # Add module import if missing
+            (r'django.setup\(\)\n', lambda match: match.group(0) + f"\n# Import module being tested\nfrom galaxy_ng.{module_path.replace('.py', '').replace('/', '.')} import *\n\n"),
         ]
         
         # Apply fixes
         modified_content = content
         for pattern, replacement in fixes:
-            # Only apply if pattern not already in content
-            if pattern not in modified_content:
-                modified_content = replacement + modified_content
+            if callable(replacement):
+                import re
+                modified_content = re.sub(pattern, replacement, modified_content)
+            elif pattern not in modified_content:
+                if pattern == "import pytest\n":
+                    # Special case for pytest import
+                    modified_content = replacement + "\n".join(line for line in modified_content.split("\n") 
+                                                            if not line.startswith("import pytest"))
+                else:
+                    modified_content = re.sub(pattern, replacement, modified_content)
         
         # Write back if changed
         if modified_content != content:

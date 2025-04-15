@@ -11,7 +11,7 @@ on:
       model:
         description: 'SambaNova model to use'
         required: false
-        default: 'Qwen2.5-Coder-32B-Instruct'
+        default: 'QwQ-32B'
         type: string
       create_pr:
         description: 'Create PR with generated tests'
@@ -40,28 +40,31 @@ jobs:
           sudo apt update
           sudo apt install -y libsasl2-dev libldap2-dev libssl-dev gettext
       
-      - name: Install requirements
+      - name: Install test dependencies
         run: |
-          python -m pip install --upgrade pip wheel setuptools
-          pip install tox coverage[toml]
-          
-          # Install additional test requirements
-          if [ -f unittest_requirements.txt ]; then
-            pip install -r unittest_requirements.txt
-          fi
-          
-          # Install the package in development mode
-          pip install -e .
+          bash .github/scripts/install_test_dependencies.sh
       
       - name: Run tests with coverage
         run: |
+          # Create pytest.ini to configure pytest properly
+          echo "[pytest]" > pytest.ini
+          echo "testpaths = galaxy_ng" >> pytest.ini
+          echo "python_files = test_*.py" >> pytest.ini
+          echo "python_classes = Test*" >> pytest.ini
+          echo "python_functions = test_*" >> pytest.ini
+          echo "markers =" >> pytest.ini
+          echo "    deployment_standalone: marks tests to run in standalone mode" >> pytest.ini
+          echo "    deployment_community: marks tests to run in community mode" >> pytest.ini
+          echo "    deployment_cloud: marks tests to run in cloud/insights mode" >> pytest.ini
+          echo "addopts = -p no:pulp_ansible" >> pytest.ini
+          
+          # Create .coveragerc file for coverage configuration
+          echo "[run]" > .coveragerc
+          echo "source = galaxy_ng" >> .coveragerc
+          echo "omit = */tests/*,*/migrations/*,*/_vendor/*" >> .coveragerc
+          
           # Run tests with tox
           tox --colored yes -e py311 || true
-          
-          # If PR number is available, inject it into coverage.xml
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            sed -i '2i <!-- PR ${{ github.event.number }} -->' coverage.xml
-          fi
           
           # Make sure coverage.xml exists
           if [ ! -f coverage.xml ]; then
@@ -86,6 +89,14 @@ jobs:
       
       - name: Validate generated tests
         run: |
+          # Create a basic Django settings module for tests if it doesn't exist
+          mkdir -p galaxy_ng
+          if [ ! -f galaxy_ng/settings.py ]; then
+            echo "from pulpcore.app.settings import *" > galaxy_ng/settings.py
+            echo "# Test-specific settings" >> galaxy_ng/settings.py
+            echo "DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}" >> galaxy_ng/settings.py
+          fi
+          
           python .github/scripts/test_validator.py generated_tests/generation_results.json coverage.xml
       
       - name: Upload generated tests as artifacts
@@ -98,41 +109,25 @@ jobs:
             coverage.xml
           retention-days: 7
       
-      - name: Run full test suite with new tests
-        run: |
-          # Run tests with tox to include the new tests
-          tox --colored yes -e py311 || true
-          
-          # Make sure new_coverage.xml exists
-          if [ ! -f coverage.xml ]; then
-            cp coverage.xml new_coverage.xml
-          else
-            mv coverage.xml new_coverage.xml
-          fi
-      
       - name: Compare coverage results
         run: |
-          if [ -f "coverage.xml" ] && [ -f "new_coverage.xml" ]; then
-            OLD_COVERAGE=$(python -c "import xml.etree.ElementTree as ET; root = ET.parse('coverage.xml').getroot(); print(root.get('line-rate'))")
-            NEW_COVERAGE=$(python -c "import xml.etree.ElementTree as ET; root = ET.parse('new_coverage.xml').getroot(); print(root.get('line-rate'))")
+          if [ -f "validation_results.json" ]; then
+            # Extract coverage data from the validation results
+            COVERAGE_BEFORE=$(python -c "import json; data = json.load(open('generated_tests/validation_results.json')); print(sum([r.get('original_coverage', 0) or 0 for r in data]) / len(data) if data else 0)")
+            COVERAGE_AFTER=$(python -c "import json; data = json.load(open('generated_tests/validation_results.json')); print(sum([r.get('new_coverage', 0) or 0 for r in data]) / len(data) if data else 0)")
+            COVERAGE_DIFF=$(python -c "print(round(${COVERAGE_AFTER} - ${COVERAGE_BEFORE}, 2))")
             
-            OLD_PCT=$(python -c "print(float($OLD_COVERAGE) * 100)")
-            NEW_PCT=$(python -c "print(float($NEW_COVERAGE) * 100)")
+            echo "Original coverage (avg): ${COVERAGE_BEFORE}%"
+            echo "New coverage (avg): ${COVERAGE_AFTER}%"
+            echo "Difference: ${COVERAGE_DIFF}%"
             
-            DIFF=$(python -c "print(float($NEW_PCT) - float($OLD_PCT))")
-            
-            echo "Original coverage: ${OLD_PCT}%"
-            echo "New coverage: ${NEW_PCT}%"
-            echo "Difference: ${DIFF}%"
-            
-            echo "COVERAGE_BEFORE=${OLD_PCT}" >> $GITHUB_ENV
-            echo "COVERAGE_AFTER=${NEW_PCT}" >> $GITHUB_ENV
-            echo "COVERAGE_DIFF=${DIFF}" >> $GITHUB_ENV
+            echo "COVERAGE_BEFORE=${COVERAGE_BEFORE}" >> $GITHUB_ENV
+            echo "COVERAGE_AFTER=${COVERAGE_AFTER}" >> $GITHUB_ENV
+            echo "COVERAGE_DIFF=${COVERAGE_DIFF}" >> $GITHUB_ENV
           else
             echo "COVERAGE_BEFORE=0" >> $GITHUB_ENV
             echo "COVERAGE_AFTER=0" >> $GITHUB_ENV
             echo "COVERAGE_DIFF=0" >> $GITHUB_ENV
-            echo "Warning: Coverage files not found for comparison"
           fi
       
       - name: Create PR with Generated Tests

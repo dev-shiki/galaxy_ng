@@ -19,7 +19,12 @@ RETRY_DELAY = 2  # seconds
 REQUEST_TIMEOUT = 60  # seconds
 
 # Default system prompt for AI test generation
-DEFAULT_SYSTEM_PROMPT = """You are an expert Python developer specializing in writing pytest tests for Django applications.
+def update_default_system_prompt():
+    """Update the default system prompt to generate better Django tests."""
+    global DEFAULT_SYSTEM_PROMPT
+    
+    # Enhanced prompt with better Django test setup instructions
+    DEFAULT_SYSTEM_PROMPT = """You are an expert Python developer specializing in writing pytest tests for Django applications.
 Your task is to analyze the provided code and generate comprehensive pytest tests that:
 1. Achieve high code coverage
 2. Test all important functionality and edge cases
@@ -27,7 +32,34 @@ Your task is to analyze the provided code and generate comprehensive pytest test
 4. Follow best practices for pytest and Django testing
 
 The code is from the Galaxy NG project, an Ansible Galaxy server built on Django and Django REST Framework.
+
+IMPORTANT INSTRUCTIONS:
+- Always include proper Django environment setup at the top of each test file:
+  ```python
+  import os
+  import sys
+  
+  # Set up Django environment
+  os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'galaxy_ng.settings')
+  # Add project root to path if needed
+  project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+  if project_root not in sys.path:
+      sys.path.insert(0, project_root)
+  
+  # Import Django settings after environment setup
+  import django
+  django.setup()
+  ```
+  
+- For each function/method being tested, create at least one test that specifically targets it
+- Mock all external dependencies (database, API calls, etc.)
+- Use pytest fixtures (@pytest.fixture) for test setup
+- Handle both success and error conditions
+- Make sure to test edge cases that will exercise untested lines of code
+- When testing Django REST Framework views, use APIClient
+- Use proper assertions that will clearly show what failed
 """
+    return DEFAULT_SYSTEM_PROMPT
 
 def fix_module_path(filename):
     """
@@ -92,6 +124,7 @@ def generate_test_with_ai(api_key, module_path, module_content, existing_tests=N
     """Use SambaNova AI to generate test code."""
     base_url = "https://api.sambanova.ai/v1"
     endpoint = f"{base_url}/chat/completions"
+    update_default_system_prompt()
     
     # Prepare existing test content if available
     existing_test_content = ""
@@ -134,11 +167,36 @@ MODULE CODE:
 
 Please generate a complete test file that will:
 1. Be saved to: {test_file_path}
-2. Properly import all necessary modules
-3. Include appropriate fixtures and mocks
-4. Achieve high code coverage by testing all functions and methods
-5. Test edge cases and error conditions
+2. Include proper Django environment setup at the beginning of the file
+3. Include all necessary imports and mocks
+4. Test each function/method with multiple test cases
+5. Achieve high code coverage by testing all code paths, including error conditions
 6. Follow Django and pytest best practices
+7. Use clear, descriptive test names
+
+REQUIRED TEST TEMPLATE:
+```python
+import os
+import sys
+
+# Setup Django environment
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'galaxy_ng.settings')
+# Add project root to path if needed
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+import django
+django.setup()
+
+import pytest
+from unittest import mock
+# [Add other imports needed for testing]
+
+# [Add your fixtures here]
+
+# [Add your test classes and functions here]
+```
 
 Return ONLY the Python test code without explanations or markdown formatting.
 """
