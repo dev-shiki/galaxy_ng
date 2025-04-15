@@ -49,7 +49,10 @@ jobs:
           pip install tox tox-gh-actions
           
           # Install additional dependencies needed for the scripts
-          pip install pytest pytest-cov coverage
+          pip install pytest pytest-cov coverage pytest-django
+          
+          # Install galaxykit from git to avoid import errors
+          pip install git+https://github.com/ansible/galaxykit.git || true
           
           # Install the package itself in development mode
           pip install -e .
@@ -71,6 +74,9 @@ jobs:
           
           # Make sure the secret key is consistent
           SECRET_KEY = 'test-key-for-galaxy-ng-testing'
+          
+          # Explicitly enable timezone to avoid warnings
+          USE_TZ = True
           
           # Disable CSRF for testing
           MIDDLEWARE = []
@@ -128,11 +134,26 @@ jobs:
           addopts = -p no:pulp_smash -p no:pulpcore -p no:pulp_ansible
           EOF
           
-          # Create .coveragerc file
+          # Create comprehensive .coveragerc file
           cat << EOF > .coveragerc
           [run]
           source = galaxy_ng
-          omit = */tests/*, */migrations/*, */_vendor/*
+          omit = 
+              */tests/*
+              */migrations/*
+              */_vendor/*
+          
+          [report]
+          exclude_lines =
+              pragma: no cover
+              def __repr__
+              raise NotImplementedError
+              if __name__ == .__main__.:
+              pass
+              raise ImportError
+          
+          [html]
+          directory = htmlcov
           EOF
       
       - name: Run tests with coverage using tox
@@ -161,17 +182,17 @@ jobs:
             --model ${{ github.event.inputs.model }} \
             --output-dir generated_tests
       
-      - name: Manually process generated tests
+      - name: Process generated tests
         run: |
-          # Create manual validation results instead of using the validator script
-          echo "Processing generated tests manually..."
-          
           # Create directory for the fixed tests
           mkdir -p galaxy_ng/tests/unit/ai_generated/
           
           # For each generated test file, apply fixes and copy to the test directory
           for test_file in $(find generated_tests -name "test_*.py"); do
             echo "Processing $test_file"
+            
+            # Extract module path from test filename
+            module_path=$(basename "$test_file" | sed 's/test_//' | sed 's/\.py$//')
             
             # Apply fixes to the test file
             sed -i '1i\
@@ -192,40 +213,51 @@ jobs:
             django.setup()\n\
             \n\
             # Use pytest marks for Django database handling\n\
-            pytestmark = pytest.mark.django_db\n' "$test_file"
-            
-            # Extract target module from filename
-            target_module=$(basename "$test_file" | sed 's/test_//')
+            pytestmark = pytest.mark.django_db\n\
+            \n\
+            # Try to import the module being tested\n\
+            try:\n\
+                from galaxy_ng.${module_path//_/\.} import *\n\
+            except ImportError:\n\
+                pass  # Module might be in a different location\n' "$test_file"
             
             # Copy to the AI generated tests directory
-            cp "$test_file" "galaxy_ng/tests/unit/ai_generated/${target_module}"
+            cp "$test_file" "galaxy_ng/tests/unit/ai_generated/$(basename "$test_file")"
           done
           
-          # Create simple validation results JSON
-          echo "[" > generated_tests/validation_results.json
-          first=true
-          for test_file in $(find galaxy_ng/tests/unit/ai_generated -name "*.py"); do
-            if [ "$first" = true ]; then
-              first=false
-            else
-              echo "," >> generated_tests/validation_results.json
-            fi
-            echo "  {" >> generated_tests/validation_results.json
-            echo "    \"test_file\": \"$test_file\"," >> generated_tests/validation_results.json
-            echo "    \"status\": \"success\"," >> generated_tests/validation_results.json
-            echo "    \"original_coverage\": 0," >> generated_tests/validation_results.json
-            echo "    \"new_coverage\": 0" >> generated_tests/validation_results.json
-            echo "  }" >> generated_tests/validation_results.json
-          done
-          echo "]" >> generated_tests/validation_results.json
+          # Create an __init__.py file to make the directory a proper package
+          touch galaxy_ng/tests/unit/ai_generated/__init__.py
       
-      - name: Run test suite with new tests
+      - name: Run the generated tests directly
         run: |
-          # Run tests with tox again to include new tests
-          tox --colored yes -e py311 || true
+          # Create a directory for test logs
+          mkdir -p test_logs
           
-          # Save the new coverage report
-          cp coverage.xml new_coverage.xml
+          # Initialize coverage data file
+          coverage erase
+          
+          # First run the normal tests to get base coverage
+          coverage run --source=galaxy_ng --omit="*/tests/*,*/migrations/*,*/_vendor/*" -m pytest galaxy_ng/tests/unit || true
+          
+          # Run each generated test file individually
+          for test_file in $(find galaxy_ng/tests/unit/ai_generated -name "test_*.py"); do
+            echo "Running test file: $test_file"
+            
+            # Extract the module name from the test file
+            module_name=$(basename "$test_file" | sed 's/test_//' | sed 's/\.py//')
+            module_path=$(echo $module_name | sed 's/_/\//g')
+            
+            # Run the test with coverage
+            coverage run --append --source=galaxy_ng --omit="*/tests/*,*/migrations/*,*/_vendor/*" \
+              -m pytest -v -p no:pulp_smash -p no:pulpcore -p no:pulp_ansible "$test_file" \
+              > "test_logs/$(basename "$test_file").log" 2>&1 || true
+            
+            echo "Finished running $test_file"
+          done
+          
+          # Generate coverage reports
+          coverage xml -o new_coverage.xml
+          coverage html
       
       - name: Upload generated tests as artifacts
         uses: actions/upload-artifact@v4
@@ -234,9 +266,11 @@ jobs:
           path: |
             generated_tests/
             galaxy_ng/tests/unit/ai_generated/
+            test_logs/
             test_candidates.json
             coverage.xml
             new_coverage.xml
+            htmlcov/
           retention-days: 7
       
       - name: Compare coverage results
