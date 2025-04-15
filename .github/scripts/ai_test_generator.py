@@ -109,7 +109,9 @@ def generate_test_with_ai(api_key, module_path, module_content, existing_tests=N
     fixed_path = fix_module_path(module_path)
     module_dir = os.path.dirname(fixed_path)
     module_name = os.path.basename(fixed_path).replace('.py', '')
-    test_dir = os.path.join('galaxy_ng', 'tests', 'unit', module_dir.replace('galaxy_ng/', ''))
+    test_dir = os.path.join(module_dir, 'tests')
+    if not os.path.exists(test_dir):
+        test_dir = os.path.join('galaxy_ng', 'tests', module_dir.replace('galaxy_ng/', ''))
         
     
     test_file_path = os.path.join(test_dir, f'test_{module_name}.py')
@@ -276,7 +278,9 @@ def main():
         # Determine the test file path
         module_dir = os.path.dirname(fixed_path)
         module_name = os.path.basename(fixed_path).replace('.py', '')
-        test_dir = os.path.join('galaxy_ng', 'tests', 'unit', module_dir.replace('galaxy_ng/', ''))
+        test_dir = os.path.join(module_dir, 'tests')
+        if not os.path.exists(test_dir):
+            test_dir = os.path.join('galaxy_ng', 'tests', module_dir.replace('galaxy_ng/', ''))
         
         # Create directory structure if it doesn't exist
         os.makedirs(test_dir, exist_ok=True)
