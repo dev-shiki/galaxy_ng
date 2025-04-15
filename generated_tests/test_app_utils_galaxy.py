@@ -1,13 +1,3 @@
-import sys
-
-# Add project root to path if needed
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "galaxy_ng.settings")
-from django.conf import settingsimport pytest
-import os
-import sys
 Okay, I need to write comprehensive pytest tests for the galaxy.py module in the Galaxy NG project. Let me start by understanding the functions in the module and what each does.
 
 First, the functions to test are:
