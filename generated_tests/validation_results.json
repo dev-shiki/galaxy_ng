@@ -1,0 +1,71 @@
+[
+  {
+    "test_file": "galaxy_ng/tests/unit/ai_generated/social_pipeline_user.py",
+    "status": "success",
+    "original_coverage": 0,
+    "new_coverage": 0
+  }
+,
+  {
+    "test_file": "galaxy_ng/tests/unit/ai_generated/app_access_control_access_policy.py",
+    "status": "success",
+    "original_coverage": 0,
+    "new_coverage": 0
+  }
+,
+  {
+    "test_file": "galaxy_ng/tests/unit/ai_generated/app_management_commands_sync-galaxy-collections.py",
+    "status": "success",
+    "original_coverage": 0,
+    "new_coverage": 0
+  }
+,
+  {
+    "test_file": "galaxy_ng/tests/unit/ai_generated/app_management_commands_set-repo-keyring.py",
+    "status": "success",
+    "original_coverage": 0,
+    "new_coverage": 0
+  }
+,
+  {
+    "test_file": "galaxy_ng/tests/unit/ai_generated/app_management_commands_galaxy-settings.py",
+    "status": "success",
+    "original_coverage": 0,
+    "new_coverage": 0
+  }
+,
+  {
+    "test_file": "galaxy_ng/tests/unit/ai_generated/app_api_ui_v1_views_search.py",
+    "status": "success",
+    "original_coverage": 0,
+    "new_coverage": 0
+  }
+,
+  {
+    "test_file": "galaxy_ng/tests/unit/ai_generated/app_utils_galaxy.py",
+    "status": "success",
+    "original_coverage": 0,
+    "new_coverage": 0
+  }
+,
+  {
+    "test_file": "galaxy_ng/tests/unit/ai_generated/app_utils_roles.py",
+    "status": "success",
+    "original_coverage": 0,
+    "new_coverage": 0
+  }
+,
+  {
+    "test_file": "galaxy_ng/tests/unit/ai_generated/social___init__.py",
+    "status": "success",
+    "original_coverage": 0,
+    "new_coverage": 0
+  }
+,
+  {
+    "test_file": "galaxy_ng/tests/unit/ai_generated/app_api_v1_serializers.py",
+    "status": "success",
+    "original_coverage": 0,
+    "new_coverage": 0
+  }
+]
