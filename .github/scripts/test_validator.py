@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-This script validates generated test files by running them with pytest
-and checking if they improve coverage. Uses a two-step approach for 
-validation and proper placement in the unit test directory.
+This script validates generated test files by running them with tox
+and checking if they improve coverage.
 """
 
 import os
@@ -14,69 +13,43 @@ import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-def install_test_dependencies():
-    """Install common dependencies needed for tests."""
+def install_dependencies():
+    """Install required test dependencies."""
     print("Installing required test dependencies...")
-    try:
-        # Install basic test dependencies
-        deps = [
-            "numpy",
-            "pandas",
-            "django",
-            "pytest-django",
-            "pytest-mock",
-            "coverage",
-            "pytest-cov"
-        ]
-        
-        # Check if unittest_requirements.txt exists and install from it
-        if os.path.exists("unittest_requirements.txt"):
-            print("Installing from unittest_requirements.txt...")
-            subprocess.run(
-                ["pip", "install", "-r", "unittest_requirements.txt"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False
-            )
-        else:
-            print("Installing standard dependencies...")
-            subprocess.run(
-                ["pip", "install"] + deps,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False
-            )
-        
-        # Try to install the project in development mode if setup.py exists
-        if os.path.exists("setup.py"):
-            print("Installing project in development mode...")
-            subprocess.run(
-                ["pip", "install", "-e", "."],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False
-            )
-            
-        print("Dependencies installed")
-        return True
-    except Exception as e:
-        print(f"Warning: Failed to install dependencies: {e}")
-        return False
+    
+    # First install numpy - this is needed by pulp_ansible pytest plugin
+    subprocess.run(
+        ["pip", "install", "numpy"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    
+    # Install from unittest_requirements if it exists
+    if os.path.exists("unittest_requirements.txt"):
+        print("Installing from unittest_requirements.txt...")
+        subprocess.run(
+            ["pip", "install", "-r", "unittest_requirements.txt"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+    
+    # Install the project in development mode
+    print("Installing project in development mode...")
+    subprocess.run(
+        ["pip", "install", "-e", "."],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    
+    print("Dependencies installed")
 
-def setup_test_environment():
-    """Setup environment variables and dependencies for tests."""
-    # Set environment variables
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "galaxy_ng.settings")
-    
-    # Install dependencies
-    install_test_dependencies()
-    
-    # Create pytest.ini if it doesn't exist
-    if not os.path.exists("pytest.ini"):
-        with open("pytest.ini", "w") as f:
-            f.write("""[pytest]
-DJANGO_SETTINGS_MODULE = galaxy_ng.settings
-django_find_project = false
+def create_pytest_ini():
+    """Create pytest.ini file to configure pytest."""
+    content = """[pytest]
+testpaths = galaxy_ng
 python_files = test_*.py
 python_classes = Test*
 python_functions = test_*
@@ -84,89 +57,19 @@ markers =
     deployment_standalone: marks tests to run in standalone mode
     deployment_community: marks tests to run in community mode
     deployment_cloud: marks tests to run in cloud/insights mode
-    skip_if_ci: marks tests that should be skipped in CI
-""")
-        print("Created pytest.ini for test configuration")
+addopts = -p no:pulp_ansible
+"""
+    with open("pytest.ini", "w") as f:
+        f.write(content)
     
-    return True
-
-def copy_file_to_temp(source, dest_dir):
-    """Copy file to temp directory to preserve it."""
-    filename = os.path.basename(source)
-    dest_path = os.path.join(dest_dir, filename)
-    shutil.copy2(source, dest_path)
-    return dest_path
-
-def ensure_directory_exists(filepath):
-    """Ensure directory exists for a given file path."""
-    directory = os.path.dirname(filepath)
-    os.makedirs(directory, exist_ok=True)
-    return directory
-
-def copy_test_to_unit_directory(test_file):
-    """Copy a validated test file to the unit test directory."""
-    if '/tests/' not in test_file:
-        return None
-    
-    # Create path for unit test directory
-    unit_test_path = test_file.replace('/tests/', '/tests/unit/')
-    
-    # Ensure unit test directory exists
-    ensure_directory_exists(unit_test_path)
-    
-    # Copy the test file
-    try:
-        shutil.copy2(test_file, unit_test_path)
-        print(f"Copied validated test to unit directory: {unit_test_path}")
-        return unit_test_path
-    except Exception as e:
-        print(f"Error copying test to unit directory: {e}")
-        return None
-
-def run_pytest_test(test_file):
-    """Run a test file directly with pytest for validation."""
-    try:
-        # First install required dependencies
-        install_test_dependencies()
-        
-        # First attempt with minimal flags for speed
-        cmd = [
-            "python", "-m", "pytest",
-            test_file,
-            "-v"
-        ]
-        
-        print(f"Running pytest validation: {' '.join(cmd)}")
-        
-        # Setup environment variables
-        env_vars = dict(os.environ)
-        env_vars["DJANGO_SETTINGS_MODULE"] = "galaxy_ng.settings"
-        env_vars["PYTHONPATH"] = os.getcwd()
-        
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-            env=env_vars
-        )
-        
-        return {
-            "success": result.returncode == 0,
-            "returncode": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e)
-        }
+    print("Created pytest.ini for test configuration")
 
 def run_tox_test(test_file, env="py311"):
     """Run a specific test file using tox."""
     try:
+        # Install dependencies first
+        install_dependencies()
+        
         cmd = [
             "tox",
             "-e", env,
@@ -194,42 +97,24 @@ def run_tox_test(test_file, env="py311"):
             "error": str(e)
         }
 
-def run_coverage_test(test_file, module_path):
-    """Run coverage analysis using pytest directly."""
-    # Create a persistent temp directory
-    temp_dir = tempfile.mkdtemp(prefix="galaxy_ng_test_")
-    
+def run_pytest_test(test_file):
+    """Run a test file with pytest directly."""
     try:
-        coverage_file = os.path.join(temp_dir, "coverage.xml")
+        # Install dependencies first
+        install_dependencies()
         
-        # Determine module directory for coverage measurement
-        if module_path.startswith('galaxy_ng/'):
-            module_dir = os.path.dirname(module_path)
-        else:
-            module_dir = os.path.dirname(f"galaxy_ng/{module_path}")
+        # Create pytest.ini to disable problematic plugins
+        create_pytest_ini()
         
-        # If there's no --cov module, fallback to the test file directory
-        if not module_dir or module_dir == '.':
-            module_dir = os.path.dirname(test_file)
-            
-        # Make sure module_dir is not empty
-        if not module_dir or module_dir == '.':
-            module_dir = 'galaxy_ng'
-            
-        # Try first with pytest using simpler approach for better compatibility
+        # Run pytest with the -p no:pulp_ansible option to disable the pulp_ansible plugin
         cmd = [
             "python", "-m", "pytest",
+            "-p", "no:pulp_ansible",  # Disable pulp_ansible plugin
             test_file,
-            "--cov",  # Just collect coverage for everything
-            f"--cov-report=xml:{coverage_file}",
             "-v"
         ]
         
-        print(f"Running coverage with pytest: {' '.join(cmd)}")
-        
-        env_vars = dict(os.environ)
-        env_vars["DJANGO_SETTINGS_MODULE"] = "galaxy_ng.settings"
-        env_vars["PYTHONPATH"] = os.getcwd()
+        print(f"Running pytest validation: {' '.join(cmd)}")
         
         result = subprocess.run(
             cmd,
@@ -237,69 +122,20 @@ def run_coverage_test(test_file, module_path):
             stderr=subprocess.PIPE,
             text=True,
             check=False,
-            env=env_vars
+            env=dict(os.environ, PYTHONPATH=os.getcwd())
         )
         
-        # Save the output for debugging
-        with open(os.path.join(temp_dir, "pytest_output.txt"), "w") as f:
-            f.write(f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}")
-        
-        # If coverage file not generated, try with tox
-        if not os.path.exists(coverage_file):
-            print("Coverage file not generated with pytest, trying with tox...")
-            tox_result = run_tox_coverage(test_file, module_path)
-            
-            # Copy tox coverage file if it exists
-            if tox_result and 'coverage_file' in tox_result and os.path.exists(tox_result['coverage_file']):
-                shutil.copy2(tox_result['coverage_file'], coverage_file)
-                print(f"Copied tox coverage file to: {coverage_file}")
-            
-            # Use tox result if we still don't have coverage
-            if not os.path.exists(coverage_file):
-                return tox_result
-        
-        # Process coverage file if it exists
-        if os.path.exists(coverage_file):
-            print(f"Coverage file generated at: {coverage_file}")
-            # Copy the coverage file for debugging
-            backup_file = os.path.join(temp_dir, "backup_coverage.xml")
-            shutil.copy2(coverage_file, backup_file)
-            print(f"Backup coverage file saved to: {backup_file}")
-            
-            # Check the coverage file for the module
-            coverage_data = extract_module_coverage(coverage_file, module_path)
-            
-            if not coverage_data:
-                print(f"Coverage data not found directly. Trying more flexible matching...")
-                coverage_data = find_matching_coverage_in_file(coverage_file, module_path)
-            
-            return {
-                "success": result.returncode == 0,
-                "returncode": result.returncode,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "coverage": coverage_data,
-                "coverage_file": backup_file
-            }
-        else:
-            print(f"WARNING: No coverage file generated at {coverage_file}")
-            return {
-                "success": result.returncode == 0,
-                "returncode": result.returncode,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "coverage": None
-            }
-            
+        return {
+            "success": result.returncode == 0,
+            "returncode": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr
+        }
     except Exception as e:
-        print(f"Error running coverage test: {e}")
         return {
             "success": False,
             "error": str(e)
         }
-    finally:
-        # Keep files for debugging
-        print(f"Coverage data and logs saved in: {temp_dir}")
 
 def run_tox_coverage(test_file, module_path, env="py311"):
     """Run coverage analysis for a specific test file using tox."""
@@ -340,12 +176,6 @@ def run_tox_coverage(test_file, module_path, env="py311"):
         with open(os.path.join(temp_dir, "tox_output.txt"), "w") as f:
             f.write(f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}")
         
-        # If generated by tox, use coverage.xml in root directory
-        root_coverage_file = "coverage.xml"
-        if not os.path.exists(coverage_file) and os.path.exists(root_coverage_file):
-            shutil.copy2(root_coverage_file, coverage_file)
-            print(f"Copied root coverage file to: {coverage_file}")
-        
         # Check if coverage file was generated
         if os.path.exists(coverage_file):
             print(f"Coverage file generated at: {coverage_file}")
@@ -372,6 +202,28 @@ def run_tox_coverage(test_file, module_path, env="py311"):
             }
         else:
             print(f"WARNING: No coverage file generated at {coverage_file}")
+            
+            # Try to copy from the default location if it exists
+            root_coverage = "coverage.xml"
+            if os.path.exists(root_coverage):
+                shutil.copy2(root_coverage, coverage_file)
+                print(f"Copied coverage file from root directory to: {coverage_file}")
+                
+                # Now try to extract coverage data again
+                coverage_data = extract_module_coverage(coverage_file, module_path)
+                if not coverage_data:
+                    coverage_data = find_matching_coverage_in_file(coverage_file, module_path)
+                
+                if coverage_data:
+                    return {
+                        "success": result.returncode == 0,
+                        "returncode": result.returncode,
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                        "coverage": coverage_data,
+                        "coverage_file": coverage_file
+                    }
+            
             return {
                 "success": result.returncode == 0,
                 "returncode": result.returncode,
@@ -538,11 +390,14 @@ def main():
         print("Usage: python test_validator.py path/to/generation_results.json [path/to/original_coverage.xml]")
         sys.exit(1)
     
-    # Setup test environment
-    setup_test_environment()
-    
     results_file = sys.argv[1]
     original_coverage_file = sys.argv[2] if len(sys.argv) > 2 else None
+    
+    # Install numpy and other dependencies first
+    install_dependencies()
+    
+    # Create pytest.ini to disable problematic plugins
+    create_pytest_ini()
     
     try:
         with open(results_file, 'r') as f:
@@ -614,44 +469,33 @@ def main():
         if fixed:
             print("Applied fixes to test file")
         
-        # Step 2: Run pytest directly first for validation
+        # Step 2: Run pytest to check if the test runs successfully
         print("Running test with pytest...")
         pytest_result = run_pytest_test(test_file)
         
-        # Step 3: If pytest successful, try with tox
-        tox_success = False
-        if pytest_result['success']:
-            print("Test passed with pytest, now trying with tox...")
-            tox_result = run_tox_test(test_file)
-            tox_success = tox_result['success']
-            
-            if tox_success:
-                print("Test passed with tox")
-            else:
-                print(f"Test passed with pytest but failed with tox: {tox_result.get('stderr', '')}")
-        
-        # Use pytest success as primary validation
         if not pytest_result['success']:
             print(f"Test file failed to run: {test_file}")
             print(f"Error: {pytest_result.get('stderr', '')}")
             
-            validation_results.append({
-                'filename': module_path,
-                'test_file': test_file,
-                'status': 'failed',
-                'reason': 'Test execution failed',
-                'error': pytest_result.get('stderr', '')
-            })
-            continue
+            # Fall back to running with tox
+            print("Trying with tox...")
+            tox_result = run_tox_test(test_file)
+            if tox_result['success']:
+                pytest_result = tox_result
+                print("Test succeeded with tox")
+            else:
+                validation_results.append({
+                    'filename': module_path,
+                    'test_file': test_file,
+                    'status': 'failed',
+                    'reason': 'Test execution failed',
+                    'error': pytest_result.get('stderr', '')
+                })
+                continue
         
-        # Step 4: Run with coverage to see if it improves coverage
+        # Step 3: Run with coverage to see if it improves coverage
         print("Running with coverage analysis...")
-        coverage_result = run_coverage_test(test_file, module_path)
-        
-        # Step 5: Copy test to unit directory for PR
-        unit_test_path = None
-        if pytest_result['success']:
-            unit_test_path = copy_test_to_unit_directory(test_file)
+        coverage_result = run_tox_coverage(test_file, module_path)
         
         # Get original coverage for comparison
         original_coverage_data = None
@@ -708,7 +552,6 @@ def main():
             validation_results.append({
                 'filename': module_path,
                 'test_file': test_file,
-                'unit_test_path': unit_test_path,
                 'status': 'partial',
                 'reason': 'Test runs but coverage data unavailable. Using estimation.',
                 'new_coverage': estimated_coverage.get('coverage_pct'),
@@ -739,7 +582,6 @@ def main():
         validation_results.append({
             'filename': module_path,
             'test_file': test_file,
-            'unit_test_path': unit_test_path,
             'status': status,
             'reason': reason,
             'new_coverage': new_coverage['coverage_pct'],
