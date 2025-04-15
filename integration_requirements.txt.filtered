@@ -1,0 +1,15 @@
+epdb
+requests==2.32.2
+# pulp requires compatibility with python 3.8
+ansible-core<2.17.0
+pytest
+# Skipping special package: orionutils
+openapi-spec-validator
+jsonschema<=4.19.0
+hvac
+importlib_resources
+galaxykit @ git+https://github.com/ansible/galaxykit
+pyyaml
+pytest-subtests
+ldap3
+setuptools
