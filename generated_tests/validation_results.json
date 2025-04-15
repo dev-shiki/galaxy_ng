@@ -1,0 +1,37 @@
+[
+  {
+    "filename": "social/__init__.py",
+    "test_file": "galaxy_ng/tests/unit/social/test___init__.py",
+    "status": "failed",
+    "reason": "Test execution failed",
+    "error": " Container compose-postgres-1  Recreate\n Container compose-postgres-1  Recreated\n Container compose-postgres-1  Starting\n Container compose-postgres-1  Started\npulp [None]: galaxy_ng.tests.unit.api.synclist_base:INFO: settings.FIXTURE_DIRS(module scope): []\npulp [None]: galaxy_ng.tests.unit.api.test_api_ui_my_synclists:INFO: settings.FIXTURE_DIRS(module scope): []\n"
+  },
+  {
+    "filename": "app/utils/galaxy.py",
+    "test_file": "galaxy_ng/tests/unit/app/utils/test_galaxy.py",
+    "status": "failed",
+    "reason": "Test execution failed",
+    "error": " Container compose-postgres-1  Recreate\n Container compose-postgres-1  Recreated\n Container compose-postgres-1  Starting\n Container compose-postgres-1  Started\npulp [None]: galaxy_ng.tests.unit.api.synclist_base:INFO: settings.FIXTURE_DIRS(module scope): []\npulp [None]: galaxy_ng.tests.unit.api.test_api_ui_my_synclists:INFO: settings.FIXTURE_DIRS(module scope): []\n"
+  },
+  {
+    "filename": "app/utils/roles.py",
+    "test_file": "galaxy_ng/tests/unit/app/utils/test_roles.py",
+    "status": "failed",
+    "reason": "Test execution failed",
+    "error": " Container compose-postgres-1  Recreate\n Container compose-postgres-1  Recreated\n Container compose-postgres-1  Starting\n Container compose-postgres-1  Started\npulp [None]: galaxy_ng.tests.unit.api.synclist_base:INFO: settings.FIXTURE_DIRS(module scope): []\npulp [None]: galaxy_ng.tests.unit.api.test_api_ui_my_synclists:INFO: settings.FIXTURE_DIRS(module scope): []\n"
+  },
+  {
+    "filename": "app/access_control/access_policy.py",
+    "test_file": "galaxy_ng/tests/unit/app/access_control/test_access_policy.py",
+    "status": "failed",
+    "reason": "Test execution failed",
+    "error": " Container compose-postgres-1  Recreate\n Container compose-postgres-1  Recreated\n Container compose-postgres-1  Starting\n Container compose-postgres-1  Started\npulp [None]: galaxy_ng.tests.unit.api.synclist_base:INFO: settings.FIXTURE_DIRS(module scope): []\npulp [None]: galaxy_ng.tests.unit.api.test_api_ui_my_synclists:INFO: settings.FIXTURE_DIRS(module scope): []\n"
+  },
+  {
+    "filename": "app/management/commands/sync-galaxy-collections.py",
+    "test_file": "galaxy_ng/tests/unit/app/management/commands/test_sync-galaxy-collections.py",
+    "status": "failed",
+    "reason": "Test execution failed",
+    "error": " Container compose-postgres-1  Recreate\n Container compose-postgres-1  Recreated\n Container compose-postgres-1  Starting\n Container compose-postgres-1  Started\npulp [None]: galaxy_ng.tests.unit.api.synclist_base:INFO: settings.FIXTURE_DIRS(module scope): []\npulp [None]: galaxy_ng.tests.unit.api.test_api_ui_my_synclists:INFO: settings.FIXTURE_DIRS(module scope): []\n"
+  }
+]
