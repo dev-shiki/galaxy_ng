@@ -45,15 +45,11 @@ jobs:
           # Install core requirements
           python -m pip install --upgrade pip wheel setuptools
           
-          # Install test dependencies from requirements files if they exist
-          for req_file in unittest_requirements.txt dev_requirements.txt; do
-            if [ -f "$req_file" ]; then
-              pip install -r "$req_file"
-            fi
-          done
+          # Install tox to run tests
+          pip install tox tox-gh-actions
           
-          # Install specific dependencies needed for testing
-          pip install pytest pytest-django pytest-cov mock coverage tox django djangorestframework
+          # Install additional dependencies needed for the scripts
+          pip install pytest pytest-cov coverage
           
           # Install the package itself in development mode
           pip install -e .
@@ -139,13 +135,10 @@ jobs:
           omit = */tests/*, */migrations/*, */_vendor/*
           EOF
       
-      - name: Run tests with coverage
+      - name: Run tests with coverage using tox
         run: |
-          # Run a simple coverage collection - skip errors
-          coverage run --source=galaxy_ng --omit="*/tests/*,*/migrations/*" -m pytest galaxy_ng || true
-          
-          # Generate coverage report
-          coverage xml
+          # Run tests with tox as it was working before
+          tox --colored yes -e py311 || true
           
           # Make sure coverage.xml exists
           if [ ! -f coverage.xml ]; then
@@ -176,13 +169,14 @@ jobs:
       - name: Run test suite with new tests
         run: |
           # Copy the generated tests to the appropriate test directories
-          find generated_tests -name "test_*.py" -exec bash -c 'cp "$0" "galaxy_ng/tests/$(echo $0 | sed -n "s/generated_tests\/test_\(.*\)\.py/\1/p" | sed "s/_/\//g" | xargs dirname)/"' {} \;
+          mkdir -p galaxy_ng/tests/unit/ai_generated/
+          cp -r generated_tests/test_*.py galaxy_ng/tests/unit/ai_generated/
           
-          # Run the full test suite with coverage
-          coverage run --source=galaxy_ng --omit="*/tests/*,*/migrations/*" -m pytest galaxy_ng -p no:pulp_smash -p no:pulpcore -p no:pulp_ansible || true
+          # Run tests with tox again to include new tests
+          tox --colored yes -e py311 || true
           
-          # Generate new coverage report
-          coverage xml -o new_coverage.xml
+          # Save the new coverage report
+          cp coverage.xml new_coverage.xml
       
       - name: Upload generated tests as artifacts
         uses: actions/upload-artifact@v4
