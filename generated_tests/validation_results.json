@@ -1,0 +1,37 @@
+[
+  {
+    "filename": "social/__init__.py",
+    "status": "skipped",
+    "reason": "Test generation failed"
+  },
+  {
+    "filename": "app/utils/galaxy.py",
+    "status": "skipped",
+    "reason": "Test generation failed"
+  },
+  {
+    "filename": "app/utils/roles.py",
+    "status": "skipped",
+    "reason": "Test generation failed"
+  },
+  {
+    "filename": "app/access_control/access_policy.py",
+    "status": "skipped",
+    "reason": "Test generation failed"
+  },
+  {
+    "filename": "app/management/commands/sync-galaxy-collections.py",
+    "status": "skipped",
+    "reason": "Test generation failed"
+  },
+  {
+    "filename": "app/management/commands/galaxy-settings.py",
+    "status": "skipped",
+    "reason": "Test generation failed"
+  },
+  {
+    "filename": "app/management/commands/set-repo-keyring.py",
+    "status": "skipped",
+    "reason": "Test generation failed"
+  }
+]
