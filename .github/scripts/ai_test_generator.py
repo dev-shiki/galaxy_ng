@@ -276,9 +276,7 @@ def main():
         # Determine the test file path
         module_dir = os.path.dirname(fixed_path)
         module_name = os.path.basename(fixed_path).replace('.py', '')
-        test_dir = os.path.join(module_dir, 'tests')
-        if not os.path.exists(test_dir):
-            test_dir = os.path.join('galaxy_ng', 'tests', module_dir.replace('galaxy_ng/', ''))
+        test_dir = os.path.join('galaxy_ng', 'tests', 'unit', module_dir.replace('galaxy_ng/', ''))
         
         # Create directory structure if it doesn't exist
         os.makedirs(test_dir, exist_ok=True)
