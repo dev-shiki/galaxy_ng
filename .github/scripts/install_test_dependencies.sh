@@ -5,7 +5,7 @@ echo "Starting dependency installation..."
 
 # Upgrade pip and install basic tools
 python -m pip install --upgrade pip setuptools wheel
-pip install tox tox-gh-actions pytest pytest-cov coverage
+pip install tox tox-gh-actions pytest pytest-cov coverage numpy
 
 # Create a list of problematic packages that need special handling
 SPECIAL_PACKAGES=(
