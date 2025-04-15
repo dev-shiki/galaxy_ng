@@ -13,6 +13,42 @@ import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+def create_pulp_smash_config():
+    """Create a mock pulp_smash configuration file."""
+    import json
+    
+    config_dir = os.path.expanduser("~/.config/pulp_smash")
+    os.makedirs(config_dir, exist_ok=True)
+    
+    config = {
+        "pulp": {
+            "auth": ["admin", "admin"],
+            "version": "3.0",
+            "selinux enabled": False
+        },
+        "hosts": [
+            {
+                "hostname": "localhost",
+                "roles": {
+                    "api": {"port": 24817, "scheme": "http", "service": "nginx"},
+                    "content": {"port": 24816, "scheme": "http", "service": "pulp_content_app"},
+                    "pulp resource manager": {},
+                    "pulp workers": {},
+                    "redis": {},
+                    "shell": {"transport": "local"},
+                    "squid": {}
+                }
+            }
+        ]
+    }
+    
+    config_path = os.path.join(config_dir, "settings.json")
+    with open(config_path, 'w') as f:
+        json.dump(config, f)
+    
+    print(f"Created mock pulp_smash config at {config_path}")
+    return config_path
+
 def install_dependencies():
     """Install required test dependencies."""
     print("Installing required test dependencies...")
@@ -100,6 +136,9 @@ def run_tox_test(test_file, env="py311"):
 def run_pytest_test(test_file):
     """Run a test file with pytest directly."""
     try:
+        # Create pulp_smash config first
+        create_pulp_smash_config()
+        
         # Install dependencies first
         install_dependencies()
         
@@ -109,7 +148,9 @@ def run_pytest_test(test_file):
         # Run pytest with the -p no:pulp_ansible option to disable the pulp_ansible plugin
         cmd = [
             "python", "-m", "pytest",
-            "-p", "no:pulp_ansible",  # Disable pulp_ansible plugin
+            "-p", "no:pulp_smash",  # Disable pulp_smash plugin
+            "-p", "no:pulpcore",    # Disable pulpcore plugin
+            "-p", "no:pulp_ansible", # Disable pulp_ansible plugin
             test_file,
             "-v"
         ]
@@ -394,11 +435,12 @@ def fix_common_issues(test_file, module_path):
         with open(test_file, 'r', encoding='utf-8') as f:
             content = f.read()
         
-        # List of common fixes to apply
+        # Enhanced list of fixes to apply
         fixes = [
             # Make sure Django environment is properly set up
             (r'import pytest\n', '''import os
 import sys
+import re
 import pytest
 from unittest import mock
 
@@ -412,31 +454,17 @@ if project_root not in sys.path:
 import django
 django.setup()
 
-'''),
-            
-            # Ensure proper Django database handling
-            (r'django.setup\(\)', '''django.setup()
-
 # Use pytest marks for Django database handling
-pytestmark = pytest.mark.django_db'''),
-            
-            # Add module import if missing
-            (r'django.setup\(\)\n', lambda match: match.group(0) + f"\n# Import module being tested\nfrom galaxy_ng.{module_path.replace('.py', '').replace('/', '.')} import *\n\n"),
+pytestmark = pytest.mark.django_db
+
+'''),
         ]
         
         # Apply fixes
         modified_content = content
         for pattern, replacement in fixes:
-            if callable(replacement):
-                import re
-                modified_content = re.sub(pattern, replacement, modified_content)
-            elif pattern not in modified_content:
-                if pattern == "import pytest\n":
-                    # Special case for pytest import
-                    modified_content = replacement + "\n".join(line for line in modified_content.split("\n") 
-                                                            if not line.startswith("import pytest"))
-                else:
-                    modified_content = re.sub(pattern, replacement, modified_content)
+            if pattern not in modified_content:
+                modified_content = replacement + modified_content
         
         # Write back if changed
         if modified_content != content:

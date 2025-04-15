@@ -11,7 +11,7 @@ on:
       model:
         description: 'SambaNova model to use'
         required: false
-        default: 'QwQ-32B'
+        default: 'Qwen2.5-Coder-32B-Instruct'
         type: string
       create_pr:
         description: 'Create PR with generated tests'
@@ -42,29 +42,110 @@ jobs:
       
       - name: Install test dependencies
         run: |
-          bash .github/scripts/install_test_dependencies.sh
+          # Install core requirements
+          python -m pip install --upgrade pip wheel setuptools
+          
+          # Install test dependencies from requirements files if they exist
+          for req_file in unittest_requirements.txt dev_requirements.txt; do
+            if [ -f "$req_file" ]; then
+              pip install -r "$req_file"
+            fi
+          done
+          
+          # Install specific dependencies needed for testing
+          pip install pytest pytest-django pytest-cov mock coverage tox django djangorestframework
+          
+          # Install the package itself in development mode
+          pip install -e .
+      
+      - name: Configure test environment
+        run: |
+          # Create a minimal Django settings module for testing
+          mkdir -p galaxy_ng
+          cat << EOF > galaxy_ng/settings.py
+          # Minimal test settings for Galaxy NG
+          
+          # Use in-memory SQLite for testing
+          DATABASES = {
+              'default': {
+                  'ENGINE': 'django.db.backends.sqlite3',
+                  'NAME': ':memory:',
+              }
+          }
+          
+          # Make sure the secret key is consistent
+          SECRET_KEY = 'test-key-for-galaxy-ng-testing'
+          
+          # Disable CSRF for testing
+          MIDDLEWARE = []
+          
+          # Minimal installed apps
+          INSTALLED_APPS = [
+              'django.contrib.auth',
+              'django.contrib.contenttypes',
+              'django.contrib.sessions',
+              'django.contrib.messages',
+              'django.contrib.staticfiles',
+              'rest_framework',
+          ]
+          
+          # Simplified auth for testing
+          AUTHENTICATION_BACKENDS = [
+              'django.contrib.auth.backends.ModelBackend',
+          ]
+          EOF
+          
+          # Create a mock pulp_smash config
+          mkdir -p ~/.config/pulp_smash
+          cat << EOF > ~/.config/pulp_smash/settings.json
+          {
+              "pulp": {
+                  "auth": ["admin", "admin"],
+                  "version": "3.0",
+                  "selinux enabled": false
+              },
+              "hosts": [
+                  {
+                      "hostname": "localhost",
+                      "roles": {
+                          "api": {"port": 24817, "scheme": "http", "service": "nginx"},
+                          "content": {"port": 24816, "scheme": "http", "service": "pulp_content_app"},
+                          "pulp resource manager": {},
+                          "pulp workers": {},
+                          "redis": {},
+                          "shell": {"transport": "local"},
+                          "squid": {}
+                      }
+                  }
+              ]
+          }
+          EOF
+          
+          # Create pytest.ini with proper plugin configuration
+          cat << EOF > pytest.ini
+          [pytest]
+          testpaths = galaxy_ng
+          python_files = test_*.py
+          python_classes = Test*
+          python_functions = test_*
+          DJANGO_SETTINGS_MODULE = galaxy_ng.settings
+          addopts = -p no:pulp_smash -p no:pulpcore -p no:pulp_ansible
+          EOF
+          
+          # Create .coveragerc file
+          cat << EOF > .coveragerc
+          [run]
+          source = galaxy_ng
+          omit = */tests/*, */migrations/*, */_vendor/*
+          EOF
       
       - name: Run tests with coverage
         run: |
-          # Create pytest.ini to configure pytest properly
-          echo "[pytest]" > pytest.ini
-          echo "testpaths = galaxy_ng" >> pytest.ini
-          echo "python_files = test_*.py" >> pytest.ini
-          echo "python_classes = Test*" >> pytest.ini
-          echo "python_functions = test_*" >> pytest.ini
-          echo "markers =" >> pytest.ini
-          echo "    deployment_standalone: marks tests to run in standalone mode" >> pytest.ini
-          echo "    deployment_community: marks tests to run in community mode" >> pytest.ini
-          echo "    deployment_cloud: marks tests to run in cloud/insights mode" >> pytest.ini
-          echo "addopts = -p no:pulp_ansible" >> pytest.ini
+          # Run a simple coverage collection - skip errors
+          coverage run --source=galaxy_ng --omit="*/tests/*,*/migrations/*" -m pytest galaxy_ng || true
           
-          # Create .coveragerc file for coverage configuration
-          echo "[run]" > .coveragerc
-          echo "source = galaxy_ng" >> .coveragerc
-          echo "omit = */tests/*,*/migrations/*,*/_vendor/*" >> .coveragerc
-          
-          # Run tests with tox
-          tox --colored yes -e py311 || true
+          # Generate coverage report
+          coverage xml
           
           # Make sure coverage.xml exists
           if [ ! -f coverage.xml ]; then
@@ -89,15 +170,19 @@ jobs:
       
       - name: Validate generated tests
         run: |
-          # Create a basic Django settings module for tests if it doesn't exist
-          mkdir -p galaxy_ng
-          if [ ! -f galaxy_ng/settings.py ]; then
-            echo "from pulpcore.app.settings import *" > galaxy_ng/settings.py
-            echo "# Test-specific settings" >> galaxy_ng/settings.py
-            echo "DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}" >> galaxy_ng/settings.py
-          fi
-          
+          # Run the test validator script with our generated tests
           python .github/scripts/test_validator.py generated_tests/generation_results.json coverage.xml
+      
+      - name: Run test suite with new tests
+        run: |
+          # Copy the generated tests to the appropriate test directories
+          find generated_tests -name "test_*.py" -exec bash -c 'cp "$0" "galaxy_ng/tests/$(echo $0 | sed -n "s/generated_tests\/test_\(.*\)\.py/\1/p" | sed "s/_/\//g" | xargs dirname)/"' {} \;
+          
+          # Run the full test suite with coverage
+          coverage run --source=galaxy_ng --omit="*/tests/*,*/migrations/*" -m pytest galaxy_ng -p no:pulp_smash -p no:pulpcore -p no:pulp_ansible || true
+          
+          # Generate new coverage report
+          coverage xml -o new_coverage.xml
       
       - name: Upload generated tests as artifacts
         uses: actions/upload-artifact@v4
@@ -107,22 +192,29 @@ jobs:
             generated_tests/
             test_candidates.json
             coverage.xml
+            new_coverage.xml
           retention-days: 7
       
       - name: Compare coverage results
         run: |
-          if [ -f "validation_results.json" ]; then
-            # Extract coverage data from the validation results
-            COVERAGE_BEFORE=$(python -c "import json; data = json.load(open('generated_tests/validation_results.json')); print(sum([r.get('original_coverage', 0) or 0 for r in data]) / len(data) if data else 0)")
-            COVERAGE_AFTER=$(python -c "import json; data = json.load(open('generated_tests/validation_results.json')); print(sum([r.get('new_coverage', 0) or 0 for r in data]) / len(data) if data else 0)")
-            COVERAGE_DIFF=$(python -c "print(round(${COVERAGE_AFTER} - ${COVERAGE_BEFORE}, 2))")
+          # Extract overall coverage from reports
+          if [ -f "coverage.xml" ] && [ -f "new_coverage.xml" ]; then
+            COVERAGE_BEFORE=$(grep -oP 'line-rate="\K[0-9.]+' coverage.xml | head -1)
+            COVERAGE_AFTER=$(grep -oP 'line-rate="\K[0-9.]+' new_coverage.xml | head -1)
             
-            echo "Original coverage (avg): ${COVERAGE_BEFORE}%"
-            echo "New coverage (avg): ${COVERAGE_AFTER}%"
+            # Convert to percentage (handle null values)
+            COVERAGE_BEFORE_PCT=$(python -c "print(float('${COVERAGE_BEFORE}' or '0') * 100)")
+            COVERAGE_AFTER_PCT=$(python -c "print(float('${COVERAGE_AFTER}' or '0') * 100)")
+            
+            # Calculate difference
+            COVERAGE_DIFF=$(python -c "print(float('${COVERAGE_AFTER_PCT}') - float('${COVERAGE_BEFORE_PCT}'))")
+            
+            echo "Original coverage: ${COVERAGE_BEFORE_PCT}%"
+            echo "New coverage: ${COVERAGE_AFTER_PCT}%"
             echo "Difference: ${COVERAGE_DIFF}%"
             
-            echo "COVERAGE_BEFORE=${COVERAGE_BEFORE}" >> $GITHUB_ENV
-            echo "COVERAGE_AFTER=${COVERAGE_AFTER}" >> $GITHUB_ENV
+            echo "COVERAGE_BEFORE=${COVERAGE_BEFORE_PCT}" >> $GITHUB_ENV
+            echo "COVERAGE_AFTER=${COVERAGE_AFTER_PCT}" >> $GITHUB_ENV
             echo "COVERAGE_DIFF=${COVERAGE_DIFF}" >> $GITHUB_ENV
           else
             echo "COVERAGE_BEFORE=0" >> $GITHUB_ENV
