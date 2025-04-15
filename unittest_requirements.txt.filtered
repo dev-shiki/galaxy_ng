@@ -1,0 +1,5 @@
+mock
+# Skipping special package: orionutils
+pytest-django
+pytest<8
+pytest-coverage
