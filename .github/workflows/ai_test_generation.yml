@@ -79,7 +79,7 @@ jobs:
       
       - name: Run original tests
         run: |
-          # Run tests with tox as it was working before - DON'T CHANGE THIS PART
+          # Run tests with tox as it was working before
           tox --colored yes -e py311 || true
           
           # Make a backup of the original coverage.xml
@@ -99,6 +99,7 @@ jobs:
       
       - name: Generate tests with AI
         run: |
+          mkdir -p generated_tests
           python .github/scripts/ai_test_generator.py \
             --candidates test_candidates.json \
             --limit ${{ github.event.inputs.limit }} \
@@ -107,41 +108,83 @@ jobs:
       
       - name: Prepare generated tests
         run: |
-          # Create directory for the fixed tests
+          # Create AI generated tests directory
           mkdir -p galaxy_ng/tests/unit/ai_generated/
           
           # Create an __init__.py file to make the directory a proper package
           touch galaxy_ng/tests/unit/ai_generated/__init__.py
           
           # For each generated test file, apply fixes and copy to the test directory
-          for test_file in $(find generated_tests -name "test_*.py"); do
-            echo "Processing $test_file"
-            dest_file="galaxy_ng/tests/unit/ai_generated/$(basename "$test_file")"
-            
-            # Copy first, then modify
-            cp "$test_file" "$dest_file"
-            
-            # Add required imports and setup to the beginning
-            sed -i '1i\
-            import os\n\
-            import sys\n\
-            import re\n\
-            import pytest\n\
-            from unittest import mock\n\
-            \n\
-            # Setup Django environment\n\
-            os.environ.setdefault("DJANGO_SETTINGS_MODULE", "galaxy_ng.settings")\n\
-            # Add project root to path if needed\n\
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))\n\
-            if project_root not in sys.path:\n\
-                sys.path.insert(0, project_root)\n\
-            \n\
-            import django\n\
-            django.setup()\n\
-            \n\
-            # Use pytest marks for Django database handling\n\
-            pytestmark = pytest.mark.django_db\n' "$dest_file"
+          for test_file in generated_tests/test_*.py; do
+            if [ -f "$test_file" ]; then
+              echo "Processing $test_file"
+              dest_file="galaxy_ng/tests/unit/ai_generated/$(basename "$test_file")"
+              
+              # Copy first, then modify
+              cp "$test_file" "$dest_file"
+              
+              # Add required imports and setup to the beginning
+              sed -i '1i\\
+          import os\\
+          import sys\\
+          import re\\
+          import pytest\\
+          from unittest import mock\\
+          \\
+          # Setup Django environment\\
+          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "galaxy_ng.settings")\\
+          # Add project root to path if needed\\
+          project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))\\
+          if project_root not in sys.path:\\
+              sys.path.insert(0, project_root)\\
+          \\
+          import django\\
+          django.setup()\\
+          \\
+          # Use pytest marks for Django database handling\\
+          pytestmark = pytest.mark.django_db\\
+          ' "$dest_file"
+            fi
           done
+          
+          # List the files to verify they exist
+          echo "Generated test files:"
+          ls -la galaxy_ng/tests/unit/ai_generated/
+      
+      - name: List files for verification
+        run: |
+          echo "Directory structure:"
+          find . -type d | grep -v "__pycache__" | sort
+          
+          echo "Test files in generated_tests:"
+          ls -la generated_tests/ || echo "No files in generated_tests/"
+          
+          echo "Test files in AI generated directory:"
+          ls -la galaxy_ng/tests/unit/ai_generated/ || echo "No files in galaxy_ng/tests/unit/ai_generated/"
+          
+          echo "Coverage files:"
+          ls -la *coverage.xml || echo "No coverage.xml files found"
+      
+      - name: Upload generated tests artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-generated-tests
+          path: galaxy_ng/tests/unit/ai_generated/
+          retention-days: 7
+      
+      - name: Upload test candidates artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-candidates
+          path: test_candidates.json
+          retention-days: 7
+      
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-data
+          path: original_coverage.xml
+          retention-days: 7
       
       - name: Create combined PR
         if: ${{ github.event.inputs.create_pr == 'true' }}
@@ -166,14 +209,3 @@ jobs:
             ai-generated
             testing
             automated-pr
-      
-      - name: Upload generated tests as artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: generated-tests
-          path: |
-            generated_tests/
-            galaxy_ng/tests/unit/ai_generated/
-            test_candidates.json
-            original_coverage.xml
-          retention-days: 7
