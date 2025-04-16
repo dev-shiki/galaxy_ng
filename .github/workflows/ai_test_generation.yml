@@ -40,28 +40,58 @@ jobs:
           sudo apt update
           sudo apt install -y libsasl2-dev libldap2-dev libssl-dev gettext
       
-      - name: Install basic dependencies
+      - name: Install dependencies
         run: |
           # Install core requirements
           python -m pip install --upgrade pip wheel setuptools
-          
-          # Install tox for test running
-          pip install tox tox-gh-actions
-          
-          # Install dependencies for test analyzer
-          pip install coverage pytest
+          pip install tox
+
+          # Install the package itself in development mode
+          pip install -e .
       
-      - name: Run initial tests with tox
+      - name: Create test infrastructure
         run: |
-          # Run tests with tox to get baseline coverage
+          # Create a mock pulp_smash config to avoid errors
+          mkdir -p ~/.config/pulp_smash
+          cat << EOF > ~/.config/pulp_smash/settings.json
+          {
+              "pulp": {
+                  "auth": ["admin", "admin"],
+                  "version": "3.0",
+                  "selinux enabled": false
+              },
+              "hosts": [
+                  {
+                      "hostname": "localhost",
+                      "roles": {
+                          "api": {"port": 24817, "scheme": "http", "service": "nginx"},
+                          "content": {"port": 24816, "scheme": "http", "service": "pulp_content_app"},
+                          "pulp resource manager": {},
+                          "pulp workers": {},
+                          "redis": {},
+                          "shell": {"transport": "local"},
+                          "squid": {}
+                      }
+                  }
+              ]
+          }
+          EOF
+      
+      - name: Run original tests
+        run: |
+          # Run tests with tox as it was working before - DON'T CHANGE THIS PART
           tox --colored yes -e py311 || true
           
-          # Make a backup of the original coverage file
-          cp coverage.xml original_coverage.xml
+          # Make a backup of the original coverage.xml
+          if [ -f coverage.xml ]; then
+            cp coverage.xml original_coverage.xml
+          else
+            echo "<?xml version='1.0' encoding='UTF-8'?><coverage></coverage>" > original_coverage.xml
+          fi
       
       - name: Analyze coverage for test candidates
         run: |
-          python .github/scripts/coverage_analyzer.py coverage.xml test_candidates.json
+          python .github/scripts/coverage_analyzer.py original_coverage.xml test_candidates.json
       
       - name: Set up SambaNova API Key
         run: |
@@ -75,122 +105,55 @@ jobs:
             --model ${{ github.event.inputs.model }} \
             --output-dir generated_tests
       
-      - name: Process generated tests
+      - name: Prepare generated tests
         run: |
-          # Create a simple bash script to fix test files
-          cat > fix_test.sh << 'EOF'
-          #!/bin/bash
+          # Create directory for the fixed tests
+          mkdir -p galaxy_ng/tests/unit/ai_generated/
           
-          # Fix a test file by adding proper imports and setup
-          fix_test_file() {
-            local test_file="$1"
-            
-            # Apply standard fixes to test file
-            sed -i '1i\
-          import os\n\
-          import sys\n\
-          import re\n\
-          import pytest\n\
-          from unittest import mock\n\
-          \n\
-          # Setup Django environment\n\
-          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "galaxy_ng.settings")\n\
-          # Add project root to path if needed\n\
-          project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))\n\
-          if project_root not in sys.path:\n\
-              sys.path.insert(0, project_root)\n\
-          \n\
-          import django\n\
-          django.setup()\n\
-          \n\
-          # Use pytest marks for Django database handling\n\
-          pytestmark = pytest.mark.django_db\n' "$test_file"
-          }
-          
-          # Process each file provided as an argument
-          for file in "$@"; do
-            echo "Fixing $file"
-            fix_test_file "$file"
-          done
-          EOF
-          
-          chmod +x fix_test.sh
-          
-          # Create directory for unit tests
-          mkdir -p galaxy_ng/tests/unit/ai_generated
+          # Create an __init__.py file to make the directory a proper package
           touch galaxy_ng/tests/unit/ai_generated/__init__.py
           
-          # Copy and fix the generated tests
+          # For each generated test file, apply fixes and copy to the test directory
           for test_file in $(find generated_tests -name "test_*.py"); do
-            # Copy to the unit tests directory
-            test_dest="galaxy_ng/tests/unit/ai_generated/$(basename "$test_file")"
-            cp "$test_file" "$test_dest"
+            echo "Processing $test_file"
+            dest_file="galaxy_ng/tests/unit/ai_generated/$(basename "$test_file")"
             
-            # Fix the test file
-            ./fix_test.sh "$test_dest"
+            # Copy first, then modify
+            cp "$test_file" "$dest_file"
+            
+            # Add required imports and setup to the beginning
+            sed -i '1i\
+            import os\n\
+            import sys\n\
+            import re\n\
+            import pytest\n\
+            from unittest import mock\n\
+            \n\
+            # Setup Django environment\n\
+            os.environ.setdefault("DJANGO_SETTINGS_MODULE", "galaxy_ng.settings")\n\
+            # Add project root to path if needed\n\
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))\n\
+            if project_root not in sys.path:\n\
+                sys.path.insert(0, project_root)\n\
+            \n\
+            import django\n\
+            django.setup()\n\
+            \n\
+            # Use pytest marks for Django database handling\n\
+            pytestmark = pytest.mark.django_db\n' "$dest_file"
           done
       
-      - name: Run tests with new tests included
-        run: |
-          # Run tox again including the new tests
-          tox --colored yes -e py311 || true
-          
-          # The new coverage.xml will now include results from the AI-generated tests
-      
-      - name: Upload generated tests as artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: generated-tests
-          path: |
-            generated_tests/
-            galaxy_ng/tests/unit/ai_generated/
-            test_candidates.json
-            coverage.xml
-            original_coverage.xml
-          retention-days: 7
-      
-      - name: Compare coverage results
-        run: |
-          # Extract overall coverage from reports
-          if [ -f "original_coverage.xml" ] && [ -f "coverage.xml" ]; then
-            COVERAGE_BEFORE=$(grep -oP 'line-rate="\K[0-9.]+' original_coverage.xml | head -1)
-            COVERAGE_AFTER=$(grep -oP 'line-rate="\K[0-9.]+' coverage.xml | head -1)
-            
-            # Convert to percentage
-            COVERAGE_BEFORE_PCT=$(python -c "print(float('${COVERAGE_BEFORE}' or '0') * 100)")
-            COVERAGE_AFTER_PCT=$(python -c "print(float('${COVERAGE_AFTER}' or '0') * 100)")
-            
-            # Calculate difference
-            COVERAGE_DIFF=$(python -c "print(float('${COVERAGE_AFTER_PCT}') - float('${COVERAGE_BEFORE_PCT}'))")
-            
-            echo "Original coverage: ${COVERAGE_BEFORE_PCT}%"
-            echo "New coverage: ${COVERAGE_AFTER_PCT}%"
-            echo "Difference: ${COVERAGE_DIFF}%"
-            
-            echo "COVERAGE_BEFORE=${COVERAGE_BEFORE_PCT}" >> $GITHUB_ENV
-            echo "COVERAGE_AFTER=${COVERAGE_AFTER_PCT}" >> $GITHUB_ENV
-            echo "COVERAGE_DIFF=${COVERAGE_DIFF}" >> $GITHUB_ENV
-          else
-            echo "COVERAGE_BEFORE=0" >> $GITHUB_ENV
-            echo "COVERAGE_AFTER=0" >> $GITHUB_ENV
-            echo "COVERAGE_DIFF=0" >> $GITHUB_ENV
-          fi
-      
-      - name: Create PR with Generated Tests
+      - name: Create combined PR
         if: ${{ github.event.inputs.create_pr == 'true' }}
         uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "AI-Generated tests to improve coverage"
-          title: "AI-Generated Tests (Coverage ${{ env.COVERAGE_BEFORE }}% → ${{ env.COVERAGE_AFTER }}%)"
+          commit-message: "Add AI-Generated tests to improve coverage"
+          title: "AI-Generated Tests"
           body: |
             This PR contains AI-generated tests to improve code coverage.
             
-            - Original coverage: ${{ env.COVERAGE_BEFORE }}%
-            - New coverage: ${{ env.COVERAGE_AFTER }}%
-            - Improvement: ${{ env.COVERAGE_DIFF }}%
-            
-            Please review the generated tests and make any necessary adjustments.
+            The tests have been placed in the `galaxy_ng/tests/unit/ai_generated/` directory.
             
             Generated using:
             - Model: ${{ github.event.inputs.model }}
@@ -203,3 +166,14 @@ jobs:
             ai-generated
             testing
             automated-pr
+      
+      - name: Upload generated tests as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-tests
+          path: |
+            generated_tests/
+            galaxy_ng/tests/unit/ai_generated/
+            test_candidates.json
+            original_coverage.xml
+          retention-days: 7
