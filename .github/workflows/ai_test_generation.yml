@@ -40,131 +40,24 @@ jobs:
           sudo apt update
           sudo apt install -y libsasl2-dev libldap2-dev libssl-dev gettext
       
-      - name: Install test dependencies
+      - name: Install basic dependencies
         run: |
           # Install core requirements
           python -m pip install --upgrade pip wheel setuptools
           
-          # Install tox to run tests
+          # Install tox for test running
           pip install tox tox-gh-actions
           
-          # Install additional dependencies needed for the scripts
-          pip install pytest pytest-cov coverage pytest-django
-          
-          # Install galaxykit from git to avoid import errors
-          pip install git+https://github.com/ansible/galaxykit.git || true
-          
-          # Install the package itself in development mode
-          pip install -e .
+          # Install dependencies for test analyzer
+          pip install coverage pytest
       
-      - name: Configure test environment
+      - name: Run initial tests with tox
         run: |
-          # Create a minimal Django settings module for testing
-          mkdir -p galaxy_ng
-          cat << EOF > galaxy_ng/settings.py
-          # Minimal test settings for Galaxy NG
-          
-          # Use in-memory SQLite for testing
-          DATABASES = {
-              'default': {
-                  'ENGINE': 'django.db.backends.sqlite3',
-                  'NAME': ':memory:',
-              }
-          }
-          
-          # Make sure the secret key is consistent
-          SECRET_KEY = 'test-key-for-galaxy-ng-testing'
-          
-          # Explicitly enable timezone to avoid warnings
-          USE_TZ = True
-          
-          # Disable CSRF for testing
-          MIDDLEWARE = []
-          
-          # Minimal installed apps
-          INSTALLED_APPS = [
-              'django.contrib.auth',
-              'django.contrib.contenttypes',
-              'django.contrib.sessions',
-              'django.contrib.messages',
-              'django.contrib.staticfiles',
-              'rest_framework',
-          ]
-          
-          # Simplified auth for testing
-          AUTHENTICATION_BACKENDS = [
-              'django.contrib.auth.backends.ModelBackend',
-          ]
-          EOF
-          
-          # Create a mock pulp_smash config
-          mkdir -p ~/.config/pulp_smash
-          cat << EOF > ~/.config/pulp_smash/settings.json
-          {
-              "pulp": {
-                  "auth": ["admin", "admin"],
-                  "version": "3.0",
-                  "selinux enabled": false
-              },
-              "hosts": [
-                  {
-                      "hostname": "localhost",
-                      "roles": {
-                          "api": {"port": 24817, "scheme": "http", "service": "nginx"},
-                          "content": {"port": 24816, "scheme": "http", "service": "pulp_content_app"},
-                          "pulp resource manager": {},
-                          "pulp workers": {},
-                          "redis": {},
-                          "shell": {"transport": "local"},
-                          "squid": {}
-                      }
-                  }
-              ]
-          }
-          EOF
-          
-          # Create pytest.ini with proper plugin configuration
-          cat << EOF > pytest.ini
-          [pytest]
-          testpaths = galaxy_ng
-          python_files = test_*.py
-          python_classes = Test*
-          python_functions = test_*
-          DJANGO_SETTINGS_MODULE = galaxy_ng.settings
-          addopts = -p no:pulp_smash -p no:pulpcore -p no:pulp_ansible
-          EOF
-          
-          # Create comprehensive .coveragerc file
-          cat << EOF > .coveragerc
-          [run]
-          source = galaxy_ng
-          omit = 
-              */tests/*
-              */migrations/*
-              */_vendor/*
-          
-          [report]
-          exclude_lines =
-              pragma: no cover
-              def __repr__
-              raise NotImplementedError
-              if __name__ == .__main__.:
-              pass
-              raise ImportError
-          
-          [html]
-          directory = htmlcov
-          EOF
-      
-      - name: Run tests with coverage using tox
-        run: |
-          # Run tests with tox as it was working before
+          # Run tests with tox to get baseline coverage
           tox --colored yes -e py311 || true
           
-          # Make sure coverage.xml exists
-          if [ ! -f coverage.xml ]; then
-            echo "<?xml version='1.0' encoding='UTF-8'?><coverage></coverage>" > coverage.xml
-          fi
+          # Make a backup of the original coverage file
+          cp coverage.xml original_coverage.xml
       
       - name: Analyze coverage for test candidates
         run: |
@@ -184,80 +77,65 @@ jobs:
       
       - name: Process generated tests
         run: |
-          # Create directory for the fixed tests
-          mkdir -p galaxy_ng/tests/unit/ai_generated/
+          # Create a simple bash script to fix test files
+          cat > fix_test.sh << 'EOF'
+          #!/bin/bash
           
-          # For each generated test file, apply fixes and copy to the test directory
-          for test_file in $(find generated_tests -name "test_*.py"); do
-            echo "Processing $test_file"
+          # Fix a test file by adding proper imports and setup
+          fix_test_file() {
+            local test_file="$1"
             
-            # Extract module path from test filename
-            module_path=$(basename "$test_file" | sed 's/test_//' | sed 's/\.py$//')
-            
-            # Apply fixes to the test file
+            # Apply standard fixes to test file
             sed -i '1i\
-            import os\n\
-            import sys\n\
-            import re\n\
-            import pytest\n\
-            from unittest import mock\n\
-            \n\
-            # Setup Django environment\n\
-            os.environ.setdefault("DJANGO_SETTINGS_MODULE", "galaxy_ng.settings")\n\
-            # Add project root to path if needed\n\
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))\n\
-            if project_root not in sys.path:\n\
-                sys.path.insert(0, project_root)\n\
-            \n\
-            import django\n\
-            django.setup()\n\
-            \n\
-            # Use pytest marks for Django database handling\n\
-            pytestmark = pytest.mark.django_db\n\
-            \n\
-            # Try to import the module being tested\n\
-            try:\n\
-                from galaxy_ng.${module_path//_/\.} import *\n\
-            except ImportError:\n\
-                pass  # Module might be in a different location\n' "$test_file"
-            
-            # Copy to the AI generated tests directory
-            cp "$test_file" "galaxy_ng/tests/unit/ai_generated/$(basename "$test_file")"
-          done
+          import os\n\
+          import sys\n\
+          import re\n\
+          import pytest\n\
+          from unittest import mock\n\
+          \n\
+          # Setup Django environment\n\
+          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "galaxy_ng.settings")\n\
+          # Add project root to path if needed\n\
+          project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))\n\
+          if project_root not in sys.path:\n\
+              sys.path.insert(0, project_root)\n\
+          \n\
+          import django\n\
+          django.setup()\n\
+          \n\
+          # Use pytest marks for Django database handling\n\
+          pytestmark = pytest.mark.django_db\n' "$test_file"
+          }
           
-          # Create an __init__.py file to make the directory a proper package
+          # Process each file provided as an argument
+          for file in "$@"; do
+            echo "Fixing $file"
+            fix_test_file "$file"
+          done
+          EOF
+          
+          chmod +x fix_test.sh
+          
+          # Create directory for unit tests
+          mkdir -p galaxy_ng/tests/unit/ai_generated
           touch galaxy_ng/tests/unit/ai_generated/__init__.py
-      
-      - name: Run the generated tests directly
-        run: |
-          # Create a directory for test logs
-          mkdir -p test_logs
           
-          # Initialize coverage data file
-          coverage erase
-          
-          # First run the normal tests to get base coverage
-          coverage run --source=galaxy_ng --omit="*/tests/*,*/migrations/*,*/_vendor/*" -m pytest galaxy_ng/tests/unit || true
-          
-          # Run each generated test file individually
-          for test_file in $(find galaxy_ng/tests/unit/ai_generated -name "test_*.py"); do
-            echo "Running test file: $test_file"
+          # Copy and fix the generated tests
+          for test_file in $(find generated_tests -name "test_*.py"); do
+            # Copy to the unit tests directory
+            test_dest="galaxy_ng/tests/unit/ai_generated/$(basename "$test_file")"
+            cp "$test_file" "$test_dest"
             
-            # Extract the module name from the test file
-            module_name=$(basename "$test_file" | sed 's/test_//' | sed 's/\.py//')
-            module_path=$(echo $module_name | sed 's/_/\//g')
-            
-            # Run the test with coverage
-            coverage run --append --source=galaxy_ng --omit="*/tests/*,*/migrations/*,*/_vendor/*" \
-              -m pytest -v -p no:pulp_smash -p no:pulpcore -p no:pulp_ansible "$test_file" \
-              > "test_logs/$(basename "$test_file").log" 2>&1 || true
-            
-            echo "Finished running $test_file"
+            # Fix the test file
+            ./fix_test.sh "$test_dest"
           done
+      
+      - name: Run tests with new tests included
+        run: |
+          # Run tox again including the new tests
+          tox --colored yes -e py311 || true
           
-          # Generate coverage reports
-          coverage xml -o new_coverage.xml
-          coverage html
+          # The new coverage.xml will now include results from the AI-generated tests
       
       - name: Upload generated tests as artifacts
         uses: actions/upload-artifact@v4
@@ -266,21 +144,19 @@ jobs:
           path: |
             generated_tests/
             galaxy_ng/tests/unit/ai_generated/
-            test_logs/
             test_candidates.json
             coverage.xml
-            new_coverage.xml
-            htmlcov/
+            original_coverage.xml
           retention-days: 7
       
       - name: Compare coverage results
         run: |
           # Extract overall coverage from reports
-          if [ -f "coverage.xml" ] && [ -f "new_coverage.xml" ]; then
-            COVERAGE_BEFORE=$(grep -oP 'line-rate="\K[0-9.]+' coverage.xml | head -1)
-            COVERAGE_AFTER=$(grep -oP 'line-rate="\K[0-9.]+' new_coverage.xml | head -1)
+          if [ -f "original_coverage.xml" ] && [ -f "coverage.xml" ]; then
+            COVERAGE_BEFORE=$(grep -oP 'line-rate="\K[0-9.]+' original_coverage.xml | head -1)
+            COVERAGE_AFTER=$(grep -oP 'line-rate="\K[0-9.]+' coverage.xml | head -1)
             
-            # Convert to percentage (handle null values)
+            # Convert to percentage
             COVERAGE_BEFORE_PCT=$(python -c "print(float('${COVERAGE_BEFORE}' or '0') * 100)")
             COVERAGE_AFTER_PCT=$(python -c "print(float('${COVERAGE_AFTER}' or '0') * 100)")
             
