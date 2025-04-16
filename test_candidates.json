@@ -1,0 +1,72 @@
+[
+  {
+    "filename": "social/__init__.py",
+    "actual_path": "galaxy_ng/social/__init__.py",
+    "coverage_pct": 0.0,
+    "missing_lines": 132,
+    "priority_score": 132.0
+  },
+  {
+    "filename": "app/utils/galaxy.py",
+    "actual_path": "galaxy_ng/app/utils/galaxy.py",
+    "coverage_pct": 36.01286173633441,
+    "missing_lines": 199,
+    "priority_score": 127.33440514469454
+  },
+  {
+    "filename": "app/utils/roles.py",
+    "actual_path": "galaxy_ng/app/utils/roles.py",
+    "coverage_pct": 0.0,
+    "missing_lines": 120,
+    "priority_score": 120.0
+  },
+  {
+    "filename": "app/access_control/access_policy.py",
+    "actual_path": "galaxy_ng/app/access_control/access_policy.py",
+    "coverage_pct": 52.15311004784689,
+    "missing_lines": 200,
+    "priority_score": 95.69377990430623
+  },
+  {
+    "filename": "app/management/commands/sync-galaxy-collections.py",
+    "actual_path": "galaxy_ng/app/management/commands/sync-galaxy-collections.py",
+    "coverage_pct": 0.0,
+    "missing_lines": 89,
+    "priority_score": 89.0
+  },
+  {
+    "filename": "app/management/commands/galaxy-settings.py",
+    "actual_path": "galaxy_ng/app/management/commands/galaxy-settings.py",
+    "coverage_pct": 0.0,
+    "missing_lines": 79,
+    "priority_score": 79.0
+  },
+  {
+    "filename": "app/management/commands/set-repo-keyring.py",
+    "actual_path": "galaxy_ng/app/management/commands/set-repo-keyring.py",
+    "coverage_pct": 0.0,
+    "missing_lines": 74,
+    "priority_score": 74.0
+  },
+  {
+    "filename": "app/api/v1/serializers.py",
+    "actual_path": "galaxy_ng/app/api/v1/serializers.py",
+    "coverage_pct": 57.77202072538861,
+    "missing_lines": 163,
+    "priority_score": 68.83160621761657
+  },
+  {
+    "filename": "app/api/ui/v1/views/search.py",
+    "actual_path": "galaxy_ng/app/api/ui/v1/views/search.py",
+    "coverage_pct": 27.131782945736433,
+    "missing_lines": 94,
+    "priority_score": 68.49612403100775
+  },
+  {
+    "filename": "social/pipeline/user.py",
+    "actual_path": "galaxy_ng/social/pipeline/user.py",
+    "coverage_pct": 0.0,
+    "missing_lines": 65,
+    "priority_score": 65.0
+  }
+]
