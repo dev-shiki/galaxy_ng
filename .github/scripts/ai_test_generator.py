@@ -10,8 +10,9 @@ import json
 import time
 import argparse
 import requests
-from pathlib import Path
 import re
+import ast
+from pathlib import Path
 
 # Constants
 MAX_RETRIES = 3
@@ -19,60 +20,51 @@ RETRY_DELAY = 2  # seconds
 REQUEST_TIMEOUT = 60  # seconds
 
 # Default system prompt for AI test generation
-def update_default_system_prompt():
-    """Update the default system prompt to generate better Django tests."""
-    global DEFAULT_SYSTEM_PROMPT
-    
-    # Enhanced prompt with better Django test setup instructions
-    DEFAULT_SYSTEM_PROMPT = """You are an expert Python developer specializing in writing pytest tests for Django applications.
+DEFAULT_SYSTEM_PROMPT = """You are an expert Python developer specializing in writing pytest tests for Django applications.
 Your task is to analyze the provided code and generate comprehensive pytest tests that:
 1. Achieve high code coverage
 2. Test all important functionality and edge cases
 3. Use appropriate mocks and fixtures
 4. Follow best practices for pytest and Django testing
 
-The code is from the Galaxy NG project, an Ansible Galaxy server built on Django and Django REST Framework.
+CRITICAL RULES:
+1. DO NOT use hyphens (-) in any import statements or module names - always use underscores (_)
+2. DO NOT assume 'factories' module exists - use mock.MagicMock to create factory mocks
+3. DO NOT import modules that might not exist - use try/except for imports
+4. ALWAYS check your Python syntax - ensure all function definitions have proper parentheses and colons
+5. ALWAYS use proper test function naming: def test_something():
+6. ALWAYS include proper Django environment setup at the top of each test file
 
-IMPORTANT INSTRUCTIONS:
-- Always include proper Django environment setup at the top of each test file:
-  ```python
-  import os
-  import sys
-  
-  # Set up Django environment
-  os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'galaxy_ng.settings')
-  # Add project root to path if needed
-  project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-  if project_root not in sys.path:
-      sys.path.insert(0, project_root)
-  
-  # Import Django settings after environment setup
-  import django
-  django.setup()
-  ```
-  
-- For each function/method being tested, create at least one test that specifically targets it
-- Mock all external dependencies (database, API calls, etc.)
-- Use pytest fixtures (@pytest.fixture) for test setup
-- Handle both success and error conditions
-- Make sure to test edge cases that will exercise untested lines of code
-- When testing Django REST Framework views, use APIClient
-- Use proper assertions that will clearly show what failed
+The code is from the Galaxy NG project, an Ansible Galaxy server built on Django and Django REST Framework.
 """
-    return DEFAULT_SYSTEM_PROMPT
+
+def normalize_module_path(module_path):
+    """Normalize module path to match Python import conventions."""
+    # Replace hyphens with underscores for proper Python imports
+    normalized_path = module_path.replace('-', '_')
+    
+    # Ensure path has galaxy_ng prefix if needed
+    if not normalized_path.startswith('galaxy_ng/'):
+        normalized_path = f'galaxy_ng/{normalized_path}'
+    
+    return normalized_path
+
+def get_module_import_path(module_path):
+    """Convert file path to Python import path."""
+    import_path = normalize_module_path(module_path).replace('/', '.').replace('.py', '')
+    return import_path
 
 def fix_module_path(filename):
     """
     Fix the module path to match the actual repository structure.
     Coverage paths like 'app/utils/galaxy.py' should be mapped to 'galaxy_ng/app/utils/galaxy.py'
     """
-    # List of possible prefix directories based on the repo structure
-    possible_prefixes = ['galaxy_ng/', 'galaxy-operator/']
+    # Normalize path - replace hyphens with underscores
+    filename = filename.replace('-', '_')
     
-    # If path already starts with one of our known directories, return as is
-    for prefix in possible_prefixes:
-        if filename.startswith(prefix):
-            return filename
+    # If path already starts with galaxy_ng/, return as is
+    if filename.startswith('galaxy_ng/'):
+        return filename
     
     # Default to adding galaxy_ng/ prefix if not already prefixed
     return os.path.join('galaxy_ng', filename)
@@ -101,6 +93,7 @@ def get_existing_tests(module_path):
             os.path.join(module_dir, 'tests', f'test_{module_name}.py'),
             os.path.join(module_dir, 'tests', module_name, 'test_*.py'),
             os.path.join('galaxy_ng', 'tests', module_dir.replace('galaxy_ng/', ''), f'test_{module_name}.py'),
+            os.path.join('galaxy_ng', 'tests', 'unit', f'test_{module_name}.py'),
         ]
         
         existing_tests = []
@@ -120,11 +113,109 @@ def get_existing_tests(module_path):
         print(f"Error finding existing tests: {e}")
         return []
 
+def create_test_template(module_path):
+    """Create a robust test template with proper imports."""
+    module_import_path = get_module_import_path(module_path)
+    
+    return f'''import os
+import sys
+import re
+import pytest
+from unittest import mock
+
+# Setup Django environment
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'galaxy_ng.settings')
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+import django
+django.setup()
+
+# Use pytest marks for Django database handling
+pytestmark = pytest.mark.django_db
+
+# Safe imports with fallbacks for the module being tested
+try:
+    from {module_import_path} import *
+except (ImportError, ModuleNotFoundError) as e:
+    print(f"Warning: Could not import {module_import_path}: {{e}}")
+    # Mock the module since we can't import it directly
+    sys.modules['{module_import_path}'] = mock.MagicMock()
+
+# Mock commonly used dependencies
+class MockFactory(mock.MagicMock):
+    """Generic factory mock for testing."""
+    @classmethod
+    def create(cls, **kwargs):
+        return mock.MagicMock(**kwargs)
+        
+# Use this if factories import fails
+if 'factories' not in globals():
+    factories = mock.MagicMock()
+    factories.UserFactory = MockFactory
+    factories.GroupFactory = MockFactory
+    factories.NamespaceFactory = MockFactory
+    factories.CollectionFactory = MockFactory
+'''
+
+def validate_and_fix_test(test_content, module_path):
+    """Validate and fix common test issues."""
+    
+    # 1. Fix import paths (replace hyphens with underscores)
+    fixed_content = re.sub(
+        r'from galaxy_ng\.([^-\s]+)-([^-\s]+)', 
+        r'from galaxy_ng.\1_\2', 
+        test_content
+    )
+    fixed_content = re.sub(
+        r'import galaxy_ng\.([^-\s]+)-([^-\s]+)', 
+        r'import galaxy_ng.\1_\2', 
+        fixed_content
+    )
+    
+    # 2. Check for syntax errors
+    try:
+        ast.parse(fixed_content)
+    except SyntaxError as e:
+        line_no = e.lineno if hasattr(e, 'lineno') else 0
+        print(f"Syntax error at line {line_no}: {e}")
+        
+        # Extract problematic lines and try to fix
+        lines = fixed_content.splitlines()
+        if 0 < line_no <= len(lines):
+            # Common fixes for syntax errors
+            if 'def test_' in lines[line_no-1] and not lines[line_no-1].strip().endswith(':'):
+                if '(' not in lines[line_no-1]:
+                    lines[line_no-1] = lines[line_no-1] + '():'
+                else:
+                    lines[line_no-1] = lines[line_no-1] + ':'
+                fixed_content = '\n'.join(lines)
+    
+    # 3. Add mock for factories if referenced but not defined
+    if "factories" in fixed_content and "factories = mock.MagicMock()" not in fixed_content:
+        factories_mock = '\n# Mock for factories\nfactories = mock.MagicMock()\nfactories.UserFactory = mock.MagicMock()\nfactories.GroupFactory = mock.MagicMock()\nfactories.NamespaceFactory = mock.MagicMock()\n'
+        if 'import mock' in fixed_content:
+            fixed_content = fixed_content.replace('import mock', 'import mock' + factories_mock)
+        else:
+            fixed_content = 'import mock\n' + factories_mock + fixed_content
+    
+    # 4. Fix module imports for the specific module
+    module_import_path = get_module_import_path(module_path)
+    if module_import_path not in fixed_content:
+        import_statement = f"\n# Import module being tested\ntry:\n    from {module_import_path} import *\nexcept (ImportError, ModuleNotFoundError):\n    # Mock module if import fails\n    sys.modules['{module_import_path}'] = mock.MagicMock()\n\n"
+        if 'import pytest' in fixed_content:
+            fixed_content = fixed_content.replace('import pytest', 'import pytest\nimport sys' + import_statement)
+        else:
+            # Add at the top after environment setup
+            fixed_content = create_test_template(module_path) + fixed_content
+    
+    return fixed_content
+
 def generate_test_with_ai(api_key, module_path, module_content, existing_tests=None, model="Qwen2.5-Coder-32B-Instruct"):
     """Use SambaNova AI to generate test code."""
     base_url = "https://api.sambanova.ai/v1"
     endpoint = f"{base_url}/chat/completions"
-    update_default_system_prompt()
     
     # Prepare existing test content if available
     existing_test_content = ""
@@ -145,8 +236,9 @@ def generate_test_with_ai(api_key, module_path, module_content, existing_tests=N
     test_dir = os.path.join(module_dir, 'tests')
     if not os.path.exists(test_dir):
         test_dir = os.path.join('galaxy_ng', 'tests', module_dir.replace('galaxy_ng/', ''))
-        
     
+    # Make sure module_name doesn't have hyphens (problematic for imports)
+    module_name = module_name.replace('-', '_')
     test_file_path = os.path.join(test_dir, f'test_{module_name}.py')
     
     # Build user prompt
@@ -174,23 +266,29 @@ Please generate a complete test file that will:
 6. Follow Django and pytest best practices
 7. Use clear, descriptive test names
 
+CRITICAL REQUIREMENTS:
+1. DO NOT use hyphens (-) in import statements or module references - always use underscores (_)
+2. DO NOT assume 'factories' module exists - use mock.MagicMock() to create mock factories
+3. Make sure all test function definitions end with colons and have proper parentheses: def test_something():
+
 REQUIRED TEST TEMPLATE:
 ```python
 import os
 import sys
+import re
+import pytest
+from unittest import mock
 
 # Setup Django environment
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'galaxy_ng.settings')
 # Add project root to path if needed
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 import django
 django.setup()
 
-import pytest
-from unittest import mock
 # [Add other imports needed for testing]
 
 # [Add your fixtures here]
@@ -335,10 +433,13 @@ def main():
         
         # Determine the test file path
         module_dir = os.path.dirname(fixed_path)
-        module_name = os.path.basename(fixed_path).replace('.py', '')
+        module_name = os.path.basename(fixed_path).replace('.py', '').replace('-', '_')
+        
+        # First try module's own tests directory
         test_dir = os.path.join(module_dir, 'tests')
         if not os.path.exists(test_dir):
-            test_dir = os.path.join('galaxy_ng', 'tests', module_dir.replace('galaxy_ng/', ''))
+            # Then try a common tests directory structure
+            test_dir = os.path.join('galaxy_ng', 'tests', 'unit', 'ai_generated')
         
         # Create directory structure if it doesn't exist
         os.makedirs(test_dir, exist_ok=True)

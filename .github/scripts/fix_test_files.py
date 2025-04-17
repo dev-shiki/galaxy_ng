@@ -1,27 +1,57 @@
 #!/usr/bin/env python3
 """
-Fix generated test files with proper Django setup and imports.
+Script to fix common issues in generated test files.
 """
 
 import os
 import sys
 import re
+import ast
+import argparse
 
-def fix_test_file(test_file, module_path=None):
-    """Fix a test file with proper Django setup and imports."""
+def fix_test_file(test_file):
+    """
+    Fix common issues in a generated test file:
+    - Module import paths with hyphens
+    - Syntax errors in test functions
+    - Missing mock factories
+    - Improper Django setup
+    """
     try:
         with open(test_file, 'r', encoding='utf-8') as f:
             content = f.read()
         
-        # Extract module path from test file if not provided
-        if not module_path and 'galaxy_ng/tests/' in test_file:
-            module_path = test_file.replace('galaxy_ng/tests/', '').replace('test_', '').replace('.py', '.py')
+        # Fix imports (replace hyphens with underscores)
+        fixed_content = re.sub(
+            r'from galaxy_ng\.([^-\s]+)-([^-\s]+)', 
+            r'from galaxy_ng.\1_\2', 
+            content
+        )
+        fixed_content = re.sub(
+            r'import galaxy_ng\.([^-\s]+)-([^-\s]+)', 
+            r'import galaxy_ng.\1_\2', 
+            fixed_content
+        )
         
-        # Get module import path
-        module_import = module_path.replace('/', '.').replace('.py', '') if module_path else ''
+        # Replace other occurrences of hyphens in module paths
+        hyphen_paths = re.findall(r'galaxy_ng\.[^-\s]+-[^-\s]+', fixed_content)
+        for path in hyphen_paths:
+            fixed_path = path.replace('-', '_')
+            fixed_content = fixed_content.replace(path, fixed_path)
         
-        # Add required imports and setup at the beginning
-        setup_code = f'''import os
+        # Mock factories if referenced but not defined
+        if "factories" in fixed_content and "factories = mock.MagicMock()" not in fixed_content:
+            factories_mock = '\n# Mock factories for testing\nfactories = mock.MagicMock()\nfactories.UserFactory = mock.MagicMock()\nfactories.GroupFactory = mock.MagicMock()\nfactories.NamespaceFactory = mock.MagicMock()\nfactories.CollectionFactory = mock.MagicMock()\n'
+            if 'import mock' in fixed_content:
+                fixed_content = fixed_content.replace('import mock', 'import mock' + factories_mock)
+            else:
+                fixed_content = 'import mock\n' + factories_mock + fixed_content
+        
+        # Check for proper Django setup
+        django_setup = "django.setup()"
+        if django_setup not in fixed_content:
+            setup_code = '''
+import os
 import sys
 import re
 import pytest
@@ -29,7 +59,6 @@ from unittest import mock
 
 # Setup Django environment
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'galaxy_ng.settings')
-# Add project root to path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
@@ -37,74 +66,54 @@ if project_root not in sys.path:
 import django
 django.setup()
 
-# Use Django DB for tests
+# Use pytest marks for Django database handling
 pytestmark = pytest.mark.django_db
-
 '''
-        # Add module import if available
-        if module_import:
-            setup_code += f"# Import module being tested\nfrom galaxy_ng.{module_import} import *\n\n"
+            fixed_content = setup_code + fixed_content
         
-        # Replace existing code or add at top
-        if 'import pytest' in content:
-            content = re.sub(r'(import pytest.*?\n)', setup_code, content, flags=re.DOTALL)
-        else:
-            content = setup_code + content
+        # Check for syntax errors
+        try:
+            ast.parse(fixed_content)
+        except SyntaxError as e:
+            line_no = e.lineno if hasattr(e, 'lineno') else 0
+            print(f"Syntax error in {test_file} at line {line_no}: {e}")
+            
+            # Extract problematic lines and try to fix
+            lines = fixed_content.splitlines()
+            if 0 < line_no <= len(lines):
+                problem_line = lines[line_no-1]
+                # Check for test function definition issues
+                if 'def test_' in problem_line and not problem_line.strip().endswith(':'):
+                    if '(' not in problem_line:
+                        lines[line_no-1] = problem_line + '():'
+                    else:
+                        lines[line_no-1] = problem_line + ':'
+                    fixed_content = '\n'.join(lines)
+                    print(f"Fixed syntax in function definition: {lines[line_no-1]}")
         
+        # Write the fixed content back to the file
         with open(test_file, 'w', encoding='utf-8') as f:
-            f.write(content)
+            f.write(fixed_content)
         
-        print(f"Successfully fixed {test_file}")
+        print(f"Successfully fixed issues in {test_file}")
         return True
-        
+    
     except Exception as e:
         print(f"Error fixing {test_file}: {e}")
         return False
 
-def create_pulp_smash_config():
-    """Create a mock pulp_smash configuration file."""
-    import json
+def main():
+    parser = argparse.ArgumentParser(description="Fix common issues in generated test files")
+    parser.add_argument("files", nargs="+", help="Test files to fix")
     
-    config_dir = os.path.expanduser("~/.config/pulp_smash")
-    os.makedirs(config_dir, exist_ok=True)
+    args = parser.parse_args()
     
-    config = {
-        "pulp": {
-            "auth": ["admin", "admin"],
-            "version": "3.0",
-            "selinux enabled": False
-        },
-        "hosts": [
-            {
-                "hostname": "localhost",
-                "roles": {
-                    "api": {"port": 24817, "scheme": "http", "service": "nginx"},
-                    "content": {"port": 24816, "scheme": "http", "service": "pulp_content_app"},
-                    "pulp resource manager": {},
-                    "pulp workers": {},
-                    "redis": {},
-                    "shell": {"transport": "local"},
-                    "squid": {}
-                }
-            }
-        ]
-    }
+    success_count = 0
+    for test_file in args.files:
+        if fix_test_file(test_file):
+            success_count += 1
     
-    config_path = os.path.join(config_dir, "settings.json")
-    with open(config_path, 'w') as f:
-        json.dump(config, f)
-    
-    print(f"Created pulp_smash config at {config_path}")
-    return config_path
+    print(f"Fixed {success_count}/{len(args.files)} test files")
 
-# Example usage
 if __name__ == "__main__":
-    # Create pulp_smash config first to prevent plugin errors
-    create_pulp_smash_config()
-    
-    # Fix all test files provided as arguments
-    if len(sys.argv) > 1:
-        for test_file in sys.argv[1:]:
-            fix_test_file(test_file)
-    else:
-        print("Usage: python fix_test_files.py <test_file1> <test_file2> ...")
+    main()

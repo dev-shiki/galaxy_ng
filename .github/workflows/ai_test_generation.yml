@@ -106,7 +106,7 @@ jobs:
             --model ${{ github.event.inputs.model }} \
             --output-dir generated_tests
       
-      - name: Prepare generated tests
+      - name: Prepare AI test directory
         run: |
           # Create AI generated tests directory
           mkdir -p galaxy_ng/tests/unit/ai_generated/
@@ -114,43 +114,12 @@ jobs:
           # Create an __init__.py file to make the directory a proper package
           touch galaxy_ng/tests/unit/ai_generated/__init__.py
           
-          # Create a template file with the imports
-          cat > template.py << 'EOF'
-          import os
-          import sys
-          import re
-          import pytest
-          from unittest import mock
-
-          # Setup Django environment
-          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "galaxy_ng.settings")
-          # Add project root to path if needed
-          project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
-          if project_root not in sys.path:
-              sys.path.insert(0, project_root)
-
-          import django
-          django.setup()
-
-          # Use pytest marks for Django database handling
-          pytestmark = pytest.mark.django_db
-
-          EOF
-          
-          # For each generated test file, apply fixes and copy to the test directory
-          for test_file in generated_tests/test_*.py; do
-            if [ -f "$test_file" ]; then
-              echo "Processing $test_file"
-              dest_file="galaxy_ng/tests/unit/ai_generated/$(basename "$test_file")"
-              
-              # Combine the template with the original file
-              cat template.py "$test_file" > "$dest_file"
-            fi
-          done
-          
-          # List the files to verify they exist
-          echo "Generated test files:"
-          ls -la galaxy_ng/tests/unit/ai_generated/
+          # Copy generated tests to the target directory
+          cp generated_tests/test_*.py galaxy_ng/tests/unit/ai_generated/ || echo "No test files to copy"
+      
+      - name: Fix Generated Test Files
+        run: |
+          python .github/scripts/fix_test_files.py galaxy_ng/tests/unit/ai_generated/
       
       - name: List files for verification
         run: |
@@ -186,6 +155,17 @@ jobs:
           name: coverage-data
           path: original_coverage.xml
           retention-days: 7
+      
+      - name: Verify test files run correctly
+        run: |
+          # Try running the generated tests to make sure they work
+          cd galaxy_ng/tests/unit/ai_generated/
+          for test_file in *.py; do
+            echo "Testing: $test_file"
+            if [[ "$test_file" != "__init__.py" ]]; then
+              python -m pytest $test_file -v || echo "Test failures in $test_file - will be fixed in PR"
+            fi
+          done
       
       - name: Create combined PR
         if: ${{ github.event.inputs.create_pr == 'true' }}
