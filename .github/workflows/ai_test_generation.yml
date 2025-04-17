@@ -114,36 +114,37 @@ jobs:
           # Create an __init__.py file to make the directory a proper package
           touch galaxy_ng/tests/unit/ai_generated/__init__.py
           
+          # Create a template file with the imports
+          cat > template.py << 'EOF'
+          import os
+          import sys
+          import re
+          import pytest
+          from unittest import mock
+
+          # Setup Django environment
+          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "galaxy_ng.settings")
+          # Add project root to path if needed
+          project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
+          if project_root not in sys.path:
+              sys.path.insert(0, project_root)
+
+          import django
+          django.setup()
+
+          # Use pytest marks for Django database handling
+          pytestmark = pytest.mark.django_db
+
+          EOF
+          
           # For each generated test file, apply fixes and copy to the test directory
           for test_file in generated_tests/test_*.py; do
             if [ -f "$test_file" ]; then
               echo "Processing $test_file"
               dest_file="galaxy_ng/tests/unit/ai_generated/$(basename "$test_file")"
               
-              # Copy first, then modify
-              cp "$test_file" "$dest_file"
-              
-              # Add required imports and setup to the beginning
-              sed -i '1i\\
-          import os\\
-          import sys\\
-          import re\\
-          import pytest\\
-          from unittest import mock\\
-          \\
-          # Setup Django environment\\
-          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "galaxy_ng.settings")\\
-          # Add project root to path if needed\\
-          project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))\\
-          if project_root not in sys.path:\\
-              sys.path.insert(0, project_root)\\
-          \\
-          import django\\
-          django.setup()\\
-          \\
-          # Use pytest marks for Django database handling\\
-          pytestmark = pytest.mark.django_db\\
-          ' "$dest_file"
+              # Combine the template with the original file
+              cat template.py "$test_file" > "$dest_file"
             fi
           done
           
