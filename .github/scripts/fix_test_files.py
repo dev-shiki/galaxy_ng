@@ -12,6 +12,45 @@ import argparse
 import traceback
 from pathlib import Path
 
+def fix_annotation_syntax(content):
+    """Fix common annotation syntax errors in AI-generated tests."""
+    # Fix variable assignments using annotation syntax
+    content = re.sub(
+        r'(\w+)\s*:\s*=\s*(.+)',  # Find patterns like "var : = value"
+        r'\1 = \2',  # Replace with "var = value"
+        content
+    )
+    
+    # Fix illegal annotation targets
+    content = re.sub(
+        r'(\w+)\[(.*?)\]\s*:\s*(.+)',  # Find patterns like "var[idx]: type"
+        r'\1[\2] = \3',  # Replace with "var[idx] = value" 
+        content
+    )
+    
+    # Fix fixture annotations without parentheses
+    content = re.sub(
+        r'@pytest\.fixture\s*:\s*',
+        r'@pytest.fixture()\ndef ',
+        content
+    )
+    
+    # Fix mark annotations without parentheses
+    content = re.sub(
+        r'@pytest\.mark\.(\w+)\s*:\s*',
+        r'@pytest.mark.\1()\ndef ',
+        content
+    )
+    
+    # Fix incorrect type hints
+    content = re.sub(
+        r'def\s+(\w+)\s*\(\s*([^)]*)\s*\)\s*:\s*([^:]+):',
+        r'def \1(\2):  # Return type: \3',
+        content
+    )
+    
+    return content
+
 def balance_parentheses(content):
     """
     Automatically balance parentheses, brackets, and braces in code.
@@ -171,6 +210,7 @@ def fix_test_file(test_file):
         content = fix_import_statements(content)
         content = add_factory_mocks(content)
         content = fix_test_definitions(content)
+        content = fix_annotation_syntax(content)  # Tambahkan baris ini
         content = handle_special_modules(content, test_file)
         content = normalize_module_path(content)
         content = balance_parentheses(content)

@@ -57,6 +57,9 @@ CRITICAL GUIDELINES FOR GENERATING VALID TESTS:
    - ALWAYS balance all parentheses, brackets, and braces
    - ALWAYS use proper indentation and formatting
    - NEVER leave function calls with unclosed parentheses
+   - NEVER use type annotations with assignment, such as: ❌ `var: type = value` or ❌ `var[idx]: type`
+   - NEVER use decorated function definitions without parentheses: ❌ `@pytest.fixture: def my_fixture`
+   - ALWAYS use proper decorator syntax: ✅ `@pytest.fixture() def my_fixture():`
 
 4. DJANGO ENVIRONMENT SETUP:
    - ALWAYS include this exact setup at the top of each test file:
@@ -391,6 +394,34 @@ def validate_and_fix_test(test_content, module_path):
     # 5. Balance parentheses, brackets, and braces
     fixed_content = balance_parentheses(fixed_content)
     
+    # NEW: Fix annotation syntax errors - common in AI generated code
+    fixed_content = re.sub(
+        r'(\w+)\s*:\s*=\s*(.+)',  # Find patterns like "var : = value"
+        r'\1 = \2',  # Replace with "var = value"
+        fixed_content
+    )
+    
+    # NEW: Fix illegal annotation targets
+    fixed_content = re.sub(
+        r'(\w+)\[(.*?)\]\s*:\s*(.+)',  # Find patterns like "var[idx]: type"
+        r'\1[\2] = \3',  # Replace with "var[idx] = value"
+        fixed_content
+    )
+    
+    # NEW: Fix fixture annotations without parentheses
+    fixed_content = re.sub(
+        r'@pytest\.fixture\s*:\s*',
+        r'@pytest.fixture()\ndef ',
+        fixed_content
+    )
+    
+    # NEW: Fix mark annotations without parentheses
+    fixed_content = re.sub(
+        r'@pytest\.mark\.(\w+)\s*:\s*',
+        r'@pytest.mark.\1()\ndef ',
+        fixed_content
+    )
+    
     # 6. Add mock for factories if referenced but not defined
     if "factories" in fixed_content and "factories = mock.MagicMock()" not in fixed_content:
         factories_mock = '\n# Mock for factories\nfactories = mock.MagicMock()\nfactories.UserFactory = mock.MagicMock()\nfactories.GroupFactory = mock.MagicMock()\nfactories.NamespaceFactory = mock.MagicMock()\n'
@@ -589,6 +620,48 @@ def save_test_file(test_path, test_content):
         traceback.print_exc()
         return False
 
+def locate_module_file(module_path):
+    """
+    Try to locate a module file using different approaches.
+    Returns the actual file path if found, or None if not found.
+    """
+    # Try the exact path first
+    if os.path.exists(module_path):
+        return module_path
+    
+    # Try the normalized path (with galaxy_ng prefix)
+    fixed_path = fix_module_path(module_path)
+    if os.path.exists(fixed_path):
+        return fixed_path
+    
+    # Try alternative names (handle hyphen/underscore variations)
+    base_name = os.path.basename(module_path)
+    dir_path = os.path.dirname(fixed_path)
+    
+    # If filename has hyphens, try with underscores
+    if '-' in base_name:
+        alt_name = base_name.replace('-', '_')
+        alt_path = os.path.join(dir_path, alt_name)
+        if os.path.exists(alt_path):
+            return alt_path
+    
+    # If filename has underscores, try with hyphens
+    if '_' in base_name:
+        alt_name = base_name.replace('_', '-')
+        alt_path = os.path.join(dir_path, alt_name)
+        if os.path.exists(alt_path):
+            return alt_path
+    
+    # Try a glob search in the directory
+    import glob
+    glob_pattern = os.path.join(dir_path, f"*{os.path.splitext(base_name)[0]}*{os.path.splitext(base_name)[1]}")
+    matches = glob.glob(glob_pattern)
+    if matches:
+        return matches[0]
+    
+    # If all else fails, return None
+    return None
+
 def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Generate tests using AI for low-coverage modules')
@@ -636,9 +709,20 @@ def main():
         # Fix the path to match repository structure
         fixed_path = fix_module_path(filename)
         print(f"Looking for file at: {fixed_path}")
+
+        # Use enhanced file location
+        actual_file_path = locate_module_file(fixed_path)
+        if not actual_file_path:
+            print(f"Skipping {filename} - could not locate file")
+            results.append({
+                'filename': filename,
+                'status': 'error',
+                'message': 'Could not locate file'
+            })
+            continue
         
         # Read the module content
-        module_content = read_file_content(fixed_path)
+        module_content = read_file_content(actual_file_path)
         if not module_content:
             print(f"Skipping {filename} - could not read file")
             results.append({
@@ -647,7 +731,7 @@ def main():
                 'message': 'Could not read file'
             })
             continue
-        
+                
         # Find existing tests
         existing_tests = get_existing_tests(filename)
         if existing_tests:
