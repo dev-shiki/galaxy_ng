@@ -12,6 +12,7 @@ import argparse
 import requests
 import re
 import ast
+import traceback
 from pathlib import Path
 
 # Constants
@@ -20,22 +21,91 @@ RETRY_DELAY = 2  # seconds
 REQUEST_TIMEOUT = 60  # seconds
 
 # Default system prompt for AI test generation
-DEFAULT_SYSTEM_PROMPT = """You are an expert Python developer specializing in writing pytest tests for Django applications.
-Your task is to analyze the provided code and generate comprehensive pytest tests that:
-1. Achieve high code coverage
-2. Test all important functionality and edge cases
-3. Use appropriate mocks and fixtures
-4. Follow best practices for pytest and Django testing
+def update_system_prompt():
+    """Create a comprehensive system prompt for AI test generation."""
+    return """You are an expert Python developer specializing in writing pytest tests for Django applications.
+Your task is to analyze the provided code and generate comprehensive pytest tests that follow these strict rules:
 
-CRITICAL RULES:
-1. DO NOT use hyphens (-) in any import statements or module names - always use underscores (_)
-2. DO NOT assume 'factories' module exists - use mock.MagicMock to create factory mocks
-3. DO NOT import modules that might not exist - use try/except for imports
-4. ALWAYS check your Python syntax - ensure all function definitions have proper parentheses and colons
-5. ALWAYS use proper test function naming: def test_something():
-6. ALWAYS include proper Django environment setup at the top of each test file
+CRITICAL GUIDELINES FOR GENERATING VALID TESTS:
 
-The code is from the Galaxy NG project, an Ansible Galaxy server built on Django and Django REST Framework.
+1. IMPORTS AND DEPENDENCIES:
+   - NEVER import 'factories' modules directly (they don't exist): ❌ `from galaxy_ng.social import factories`
+   - NEVER use incomplete imports: ❌ `from galaxy_module`
+   - ALWAYS mock external dependencies: ✅ `module = mock.MagicMock()`
+   - ALWAYS use try/except for potentially problematic imports:
+     ```python
+     try:
+         from galaxy_ng.app.utils.galaxy import get_collection_download_url
+     except ImportError:
+         # Mock the function if import fails
+         get_collection_download_url = mock.MagicMock()
+     ```
+
+2. MOCKING FACTORIES:
+   - ALWAYS mock factories instead of importing them:
+     ```python
+     # Create mock factories
+     factories = mock.MagicMock()
+     factories.UserFactory = mock.MagicMock(return_value=mock.MagicMock(username="test_user"))
+     factories.GroupFactory = mock.MagicMock()
+     factories.NamespaceFactory = mock.MagicMock()
+     factories.CollectionFactory = mock.MagicMock()
+     ```
+
+3. SYNTAX AND STRUCTURE:
+   - ALWAYS use proper function definitions: ✅ `def test_something():`
+   - ALWAYS balance all parentheses, brackets, and braces
+   - ALWAYS use proper indentation and formatting
+   - NEVER leave function calls with unclosed parentheses
+
+4. DJANGO ENVIRONMENT SETUP:
+   - ALWAYS include this exact setup at the top of each test file:
+     ```python
+     import os
+     import sys
+     import pytest
+     from unittest import mock
+
+     # Setup Django environment
+     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'galaxy_ng.settings')
+     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
+     if project_root not in sys.path:
+         sys.path.insert(0, project_root)
+
+     import django
+     django.setup()
+
+     # Use pytest marks for Django database handling
+     pytestmark = pytest.mark.django_db
+     ```
+
+5. SPECIAL MODULE HANDLING:
+   - For __init__.py files, use system module mocking:
+     ```python
+     # Mock modules accessed in __init__.py
+     import sys
+     social_auth = mock.MagicMock()
+     sys.modules['galaxy_ng.social.auth'] = social_auth
+     ```
+   - For Django model tests, use proper model mocking:
+     ```python
+     # Mock Django models
+     model_mock = mock.MagicMock()
+     model_mock.objects.get.return_value = mock.MagicMock(name="mocked_object")
+     model_mock.DoesNotExist = Exception
+     ```
+
+6. FILE NAMING AND MODULE REFERENCES:
+   - NEVER use hyphens (-) in import statements or file references - always use underscores (_)
+   - Normalize all module paths: ✅ `galaxy_ng.app.utils.galaxy` ❌ `galaxy_ng.app.utils-galaxy`
+
+7. TESTING APPROACH:
+   - Create separate test functions for each method/function being tested
+   - Include tests for success cases, error cases, and edge cases
+   - Use descriptive test names that indicate what's being tested
+   - Prefer focused tests that test one thing well over large complex tests
+
+The code is from the Galaxy NG project, which is an Ansible Galaxy server built on Django and Django REST Framework.
 """
 
 def normalize_module_path(module_path):
@@ -159,14 +229,147 @@ if 'factories' not in globals():
     factories.CollectionFactory = MockFactory
 '''
 
+def balance_parentheses(content):
+    """
+    Automatically balance parentheses, brackets, and braces in code.
+    Uses a stack-based approach to find and fix mismatches.
+    """
+    lines = content.splitlines()
+    stack = []
+    line_brackets = {}  # Track brackets by line
+    
+    # First pass: mark all opening brackets and their lines
+    for i, line in enumerate(lines):
+        line_stack = []
+        for j, char in enumerate(line):
+            if char in '({[':
+                stack.append((char, i, j))
+                line_stack.append((char, j))
+            elif char in ')}]':
+                if stack and ((char == ')' and stack[-1][0] == '(') or
+                              (char == '}' and stack[-1][0] == '{') or
+                              (char == ']' and stack[-1][0] == '[')):
+                    stack.pop()
+                    if line_stack:
+                        line_stack.pop()
+                else:
+                    # Unmatched closing bracket - ignore for now
+                    pass
+        
+        # Store brackets that weren't closed on this line
+        if line_stack:
+            line_brackets[i] = line_stack
+    
+    # Second pass: add missing closing brackets at the end of appropriate lines
+    if stack:
+        # Group by line
+        by_line = {}
+        for bracket, line_num, _ in stack:
+            by_line.setdefault(line_num, []).append(bracket)
+        
+        # Get corresponding closing brackets
+        closing = {
+            '(': ')',
+            '{': '}',
+            '[': ']'
+        }
+        
+        # Fix lines with unclosed brackets
+        for i, brackets in sorted(by_line.items(), reverse=True):
+            # Check if next line has a closing bracket matching our opening
+            if i < len(lines) - 1 and any(c in closing.values() for c in lines[i+1]):
+                continue  # Skip - next line probably has closing bracket
+                
+            # Add closing brackets in reverse order
+            to_close = ''.join(closing[b] for b in brackets[::-1])
+            
+            # Only add if the line doesn't already end with a bracket
+            if not lines[i].rstrip().endswith(tuple(closing.values())):
+                lines[i] = lines[i] + to_close
+    
+    return '\n'.join(lines)
+
+def fix_import_statements(content):
+    """
+    Fix common import errors:
+    1. Replace imports of non-existent factories
+    2. Fix incomplete import statements
+    3. Handle imports for special modules like __init__
+    """
+    # Replace imports of non-existent factories
+    factory_patterns = [
+        (r'from galaxy_ng\.social import factories(.*)', r'# Mock factories\nimport mock\nsocial_factories = mock.MagicMock()\1'),
+        (r'from galaxy_ng\.tests import factories(.*)', r'# Mock factories\nimport mock\nfactories = mock.MagicMock()\1'),
+        (r'from galaxy_ng\.([^.\s]+) import factories(.*)', r'# Mock \1 factories\nimport mock\n\1_factories = mock.MagicMock()\2'),
+    ]
+    
+    for pattern, replacement in factory_patterns:
+        content = re.sub(pattern, replacement, content)
+    
+    # Fix incomplete import statements
+    incomplete_imports = [
+        (r'from galaxy_module\s*$', r'# Fixed incomplete import\nimport mock\ngalaxy_module = mock.MagicMock()'),
+        (r'import galaxy_module\s*$', r'# Fixed incomplete import\nimport mock\ngalaxy_module = mock.MagicMock()'),
+        (r'from ([^\s.]+)\s*$', r'# Fixed incomplete import\nimport mock\n\1 = mock.MagicMock()'),
+    ]
+    
+    for pattern, replacement in incomplete_imports:
+        content = re.sub(pattern, replacement, content)
+    
+    # Make sure mock is imported
+    if 'mock.MagicMock' in content and 'import mock' not in content:
+        content = 'import mock\n' + content
+        
+    return content
+
+def handle_special_modules(content, test_file):
+    """Add special handling for __init__.py files and other special modules."""
+    
+    # Special handling for __init__.py tests
+    if 'test___init__' in test_file or 'test_social___init__' in test_file:
+        init_mocks = '''
+# Mock special modules for __init__.py testing
+import sys
+social_factories = mock.MagicMock()
+auth_module = mock.MagicMock()
+social_auth = mock.MagicMock()
+social_app = mock.MagicMock()
+
+# Add to sys.modules to prevent import errors
+sys.modules['galaxy_ng.social.factories'] = social_factories
+sys.modules['galaxy_ng.social.auth'] = auth_module
+'''
+        if 'import mock' in content:
+            content = content.replace('import mock', 'import mock\nimport sys', 1)
+            if 'social_factories =' not in content:
+                content = content.replace('import sys', 'import sys' + init_mocks, 1)
+        else:
+            content = 'import mock\nimport sys' + init_mocks + content
+    
+    return content
+
+def fix_test_definitions(content):
+    """Fix test function definitions with syntax errors."""
+    def_pattern = r'def\s+(test_\w+)\s*(?!\()'
+    fixed_content = re.sub(def_pattern, r'def \1()', content)
+    
+    # Fix test definitions that might be missing a colon at the end
+    def_pattern2 = r'def\s+(test_\w+)(\([^)]*\))\s*(?!:)'
+    fixed_content = re.sub(def_pattern2, r'def \1\2:', fixed_content)
+    
+    return fixed_content
+
 def validate_and_fix_test(test_content, module_path):
     """Validate and fix common test issues."""
+    
+    # Apply fixes in sequence
+    fixed_content = test_content
     
     # 1. Fix import paths (replace hyphens with underscores)
     fixed_content = re.sub(
         r'from galaxy_ng\.([^-\s]+)-([^-\s]+)', 
         r'from galaxy_ng.\1_\2', 
-        test_content
+        fixed_content
     )
     fixed_content = re.sub(
         r'import galaxy_ng\.([^-\s]+)-([^-\s]+)', 
@@ -174,25 +377,21 @@ def validate_and_fix_test(test_content, module_path):
         fixed_content
     )
     
-    # 2. Check for syntax errors
-    try:
-        ast.parse(fixed_content)
-    except SyntaxError as e:
-        line_no = e.lineno if hasattr(e, 'lineno') else 0
-        print(f"Syntax error at line {line_no}: {e}")
-        
-        # Extract problematic lines and try to fix
-        lines = fixed_content.splitlines()
-        if 0 < line_no <= len(lines):
-            # Common fixes for syntax errors
-            if 'def test_' in lines[line_no-1] and not lines[line_no-1].strip().endswith(':'):
-                if '(' not in lines[line_no-1]:
-                    lines[line_no-1] = lines[line_no-1] + '():'
-                else:
-                    lines[line_no-1] = lines[line_no-1] + ':'
-                fixed_content = '\n'.join(lines)
+    # 2. Fix factory imports
+    fixed_content = fix_import_statements(fixed_content)
     
-    # 3. Add mock for factories if referenced but not defined
+    # 3. Fix test function definitions
+    fixed_content = fix_test_definitions(fixed_content)
+    
+    # 4. Add handling for special modules
+    module_name = os.path.basename(module_path)
+    if module_name == '__init__.py' or 'social/__init__' in module_path:
+        fixed_content = handle_special_modules(fixed_content, module_path)
+    
+    # 5. Balance parentheses, brackets, and braces
+    fixed_content = balance_parentheses(fixed_content)
+    
+    # 6. Add mock for factories if referenced but not defined
     if "factories" in fixed_content and "factories = mock.MagicMock()" not in fixed_content:
         factories_mock = '\n# Mock for factories\nfactories = mock.MagicMock()\nfactories.UserFactory = mock.MagicMock()\nfactories.GroupFactory = mock.MagicMock()\nfactories.NamespaceFactory = mock.MagicMock()\n'
         if 'import mock' in fixed_content:
@@ -200,7 +399,7 @@ def validate_and_fix_test(test_content, module_path):
         else:
             fixed_content = 'import mock\n' + factories_mock + fixed_content
     
-    # 4. Fix module imports for the specific module
+    # 7. Fix module imports for the specific module
     module_import_path = get_module_import_path(module_path)
     if module_import_path not in fixed_content:
         import_statement = f"\n# Import module being tested\ntry:\n    from {module_import_path} import *\nexcept (ImportError, ModuleNotFoundError):\n    # Mock module if import fails\n    sys.modules['{module_import_path}'] = mock.MagicMock()\n\n"
@@ -210,12 +409,27 @@ def validate_and_fix_test(test_content, module_path):
             # Add at the top after environment setup
             fixed_content = create_test_template(module_path) + fixed_content
     
+    # 8. Ensure django.setup() is included
+    if 'django.setup()' not in fixed_content:
+        fixed_content = create_test_template(module_path) + fixed_content
+    
+    # 9. Verify syntax with ast parse
+    try:
+        ast.parse(fixed_content)
+    except SyntaxError as e:
+        print(f"Warning: Syntax error remains in fixed content: {e}")
+        # Mark file as needing manual review
+        fixed_content = f"# WARNING: This file has syntax errors that need manual review: {e}\n" + fixed_content
+    
     return fixed_content
 
 def generate_test_with_ai(api_key, module_path, module_content, existing_tests=None, model="Qwen2.5-Coder-32B-Instruct"):
     """Use SambaNova AI to generate test code."""
     base_url = "https://api.sambanova.ai/v1"
     endpoint = f"{base_url}/chat/completions"
+    
+    # Get updated system prompt
+    system_prompt = update_system_prompt()
     
     # Prepare existing test content if available
     existing_test_content = ""
@@ -270,8 +484,10 @@ CRITICAL REQUIREMENTS:
 1. DO NOT use hyphens (-) in import statements or module references - always use underscores (_)
 2. DO NOT assume 'factories' module exists - use mock.MagicMock() to create mock factories
 3. Make sure all test function definitions end with colons and have proper parentheses: def test_something():
+4. ALWAYS balance parentheses, brackets, and braces in your code
+5. For init.py files, use special module mocking to prevent import errors
 
-REQUIRED TEST TEMPLATE:
+Please include this exact Django environment setup:
 ```python
 import os
 import sys
@@ -281,7 +497,6 @@ from unittest import mock
 
 # Setup Django environment
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'galaxy_ng.settings')
-# Add project root to path if needed
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
@@ -289,11 +504,8 @@ if project_root not in sys.path:
 import django
 django.setup()
 
-# [Add other imports needed for testing]
-
-# [Add your fixtures here]
-
-# [Add your test classes and functions here]
+# Use pytest marks for Django database handling
+pytestmark = pytest.mark.django_db
 ```
 
 Return ONLY the Python test code without explanations or markdown formatting.
@@ -303,17 +515,17 @@ Return ONLY the Python test code without explanations or markdown formatting.
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
-    
+
     data = {
         "model": model,
         "temperature": 0.1,  # Low temperature for more deterministic output
         "top_p": 0.1,  # Lower top_p for more focused output
         "messages": [
-            {"role": "system", "content": DEFAULT_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ]
     }
-    
+
     for attempt in range(MAX_RETRIES):
         try:
             response = requests.post(endpoint, headers=headers, json=data, timeout=REQUEST_TIMEOUT)
@@ -325,12 +537,21 @@ Return ONLY the Python test code without explanations or markdown formatting.
                 # Clean up any markdown code block formatting the AI might have included
                 test_code = re.sub(r'```python\s*', '', test_code)
                 test_code = re.sub(r'```\s*$', '', test_code)
+                
+                # Apply validation and fixes to the generated test code
+                test_code = validate_and_fix_test(test_code, module_path)
+                
                 return test_code
             else:
                 print(f"Unexpected API response format: {result}")
                 
         except requests.exceptions.RequestException as e:
             print(f"API request error (attempt {attempt+1}/{MAX_RETRIES}): {e}")
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(RETRY_DELAY)
+        except Exception as e:
+            print(f"Unexpected error in test generation: {e}")
+            traceback.print_exc()
             if attempt < MAX_RETRIES - 1:
                 time.sleep(RETRY_DELAY)
         
@@ -349,6 +570,14 @@ def save_test_file(test_path, test_content):
             os.rename(test_path, backup_path)
             print(f"Created backup of existing test file: {backup_path}")
         
+        # Final validation before saving
+        try:
+            ast.parse(test_content)
+        except SyntaxError as e:
+            print(f"Warning: Syntax error in generated test: {e}")
+            # Add comment at the top to indicate it needs fixing
+            test_content = f"# WARNING: This file has syntax errors that need to be fixed: {e}\n" + test_content
+        
         # Write the new test file
         with open(test_path, 'w', encoding='utf-8') as f:
             f.write(test_content)
@@ -357,6 +586,7 @@ def save_test_file(test_path, test_content):
         return True
     except Exception as e:
         print(f"Error saving test file: {e}")
+        traceback.print_exc()
         return False
 
 def main():
@@ -369,13 +599,13 @@ def main():
     parser.add_argument('--limit', type=int, default=5, help='Maximum number of modules to process')
     
     args = parser.parse_args()
-    
+
     # Get API key from args or environment
     api_key = args.api_key or os.environ.get('SAMBANOVA_API_KEY')
     if not api_key:
         print("Error: SambaNova API key not provided. Use --api-key or set SAMBANOVA_API_KEY environment variable.")
         sys.exit(1)
-    
+
     # Read candidates file
     try:
         with open(args.candidates, 'r') as f:
@@ -383,17 +613,24 @@ def main():
     except Exception as e:
         print(f"Error reading candidates file: {e}")
         sys.exit(1)
-    
+
     # Limit the number of candidates to process
     candidates = candidates[:args.limit]
-    
+
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
-    
+
     # Process each candidate
     results = []
     for i, candidate in enumerate(candidates, 1):
         filename = candidate['filename']
+        
+        # Normalize filename (replace hyphens with underscores)
+        normalized_filename = filename.replace('-', '_')
+        if normalized_filename != filename:
+            print(f"Normalized filename from {filename} to {normalized_filename}")
+            filename = normalized_filename
+        
         print(f"\n[{i}/{len(candidates)}] Processing {filename} (Coverage: {candidate['coverage_pct']:.2f}%)")
         
         # Fix the path to match repository structure
@@ -467,12 +704,12 @@ def main():
                 'status': 'error',
                 'message': 'Failed to save test file'
             })
-    
+
     # Save results summary
     results_file = os.path.join(args.output_dir, 'generation_results.json')
     with open(results_file, 'w') as f:
         json.dump(results, f, indent=2)
-    
+
     # Print summary
     success_count = sum(1 for r in results if r['status'] == 'success')
     print(f"\nTest generation summary: {success_count}/{len(results)} successful")

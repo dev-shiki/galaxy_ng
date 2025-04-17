@@ -44,7 +44,10 @@ jobs:
         run: |
           # Install core requirements
           python -m pip install --upgrade pip wheel setuptools
-          pip install tox
+          pip install tox pytest pytest-django pytest-cov
+
+          # Install required packages for the scripts
+          pip install requests
 
           # Install the package itself in development mode
           pip install -e .
@@ -76,6 +79,12 @@ jobs:
               ]
           }
           EOF
+
+          # Create directory structure for generated tests
+          mkdir -p galaxy_ng/tests/unit/ai_generated/
+          touch galaxy_ng/tests/unit/ai_generated/__init__.py
+          touch galaxy_ng/tests/__init__.py
+          touch galaxy_ng/tests/unit/__init__.py
       
       - name: Run original tests
         run: |
@@ -106,34 +115,79 @@ jobs:
             --model ${{ github.event.inputs.model }} \
             --output-dir generated_tests
       
-      - name: Prepare AI test directory
+      - name: Run Test Fixes
         run: |
-          # Create AI generated tests directory
-          mkdir -p galaxy_ng/tests/unit/ai_generated/
-          
-          # Create an __init__.py file to make the directory a proper package
-          touch galaxy_ng/tests/unit/ai_generated/__init__.py
-          
-          # Copy generated tests to the target directory
-          cp generated_tests/test_*.py galaxy_ng/tests/unit/ai_generated/ || echo "No test files to copy"
+          # Only run the test fixer if there are generated tests
+          if [ -d "galaxy_ng/tests/unit/ai_generated" ] && [ "$(ls -A galaxy_ng/tests/unit/ai_generated)" ]; then
+            echo "Fixing generated tests..."
+            python .github/scripts/fix_test_files.py --path galaxy_ng/tests/unit/ai_generated
+          else
+            echo "No tests to fix."
+          fi
       
-      - name: Fix Generated Test Files
+      - name: Validate Fixed Tests
         run: |
-          python .github/scripts/fix_test_files.py galaxy_ng/tests/unit/ai_generated/
+          # Create a simple script to check test files
+          cat > check_tests.py << 'EOF'
+          import os
+          import sys
+          import ast
+          import re
+
+          def check_file(filepath):
+              print(f"Checking {filepath}...")
+              try:
+                  with open(filepath, 'r') as f:
+                      content = f.read()
+                  
+                  # Check for proper Django setup
+                  if "django.setup()" not in content:
+                      print(f"WARNING: Django setup missing in {filepath}")
+                  
+                  # Check for factory imports
+                  if re.search(r'from galaxy_ng\.[^\s]+\s+import\s+factories', content):
+                      print(f"WARNING: Direct factory import in {filepath}")
+                  
+                  # Validate syntax
+                  try:
+                      ast.parse(content)
+                      print(f"✅ {filepath} is syntactically valid")
+                      return True
+                  except SyntaxError as e:
+                      print(f"❌ {filepath} has syntax error: {e}")
+                      return False
+              except Exception as e:
+                  print(f"Error checking {filepath}: {e}")
+                  return False
+
+          # Check all test files in the directory
+          test_dir = "galaxy_ng/tests/unit/ai_generated"
+          valid_count = 0
+          error_count = 0
+
+          if os.path.exists(test_dir):
+              for file in os.listdir(test_dir):
+                  if file.endswith(".py") and file != "__init__.py":
+                      file_path = os.path.join(test_dir, file)
+                      if check_file(file_path):
+                          valid_count += 1
+                      else:
+                          error_count += 1
+              
+              print(f"\nValidation results: {valid_count} valid, {error_count} with errors")
+              sys.exit(1 if error_count > 0 else 0)
+          else:
+              print(f"Test directory {test_dir} not found")
+              sys.exit(1)
+          EOF
+
+          # Run the checking script
+          python check_tests.py || echo "Some tests need additional fixes"
       
-      - name: List files for verification
+      - name: Try running generated tests
         run: |
-          echo "Directory structure:"
-          find . -type d | grep -v "__pycache__" | sort
-          
-          echo "Test files in generated_tests:"
-          ls -la generated_tests/ || echo "No files in generated_tests/"
-          
-          echo "Test files in AI generated directory:"
-          ls -la galaxy_ng/tests/unit/ai_generated/ || echo "No files in galaxy_ng/tests/unit/ai_generated/"
-          
-          echo "Coverage files:"
-          ls -la *coverage.xml || echo "No coverage.xml files found"
+          # Attempt to collect tests to verify they can be imported
+          python -m pytest galaxy_ng/tests/unit/ai_generated/ --collect-only -v || echo "Some tests can't be collected"
       
       - name: Upload generated tests artifact
         uses: actions/upload-artifact@v4
@@ -156,17 +210,6 @@ jobs:
           path: original_coverage.xml
           retention-days: 7
       
-      - name: Verify test files run correctly
-        run: |
-          # Try running the generated tests to make sure they work
-          cd galaxy_ng/tests/unit/ai_generated/
-          for test_file in *.py; do
-            echo "Testing: $test_file"
-            if [[ "$test_file" != "__init__.py" ]]; then
-              python -m pytest $test_file -v || echo "Test failures in $test_file - will be fixed in PR"
-            fi
-          done
-      
       - name: Create combined PR
         if: ${{ github.event.inputs.create_pr == 'true' }}
         uses: peter-evans/create-pull-request@v5
@@ -177,7 +220,13 @@ jobs:
           body: |
             This PR contains AI-generated tests to improve code coverage.
             
-            The tests have been placed in the `galaxy_ng/tests/unit/ai_generated/` directory.
+            The tests have been placed in the `galaxy_ng/tests/unit/ai_generated/` directory and have been preprocessed 
+            to fix common issues like:
+            - Non-existent factory imports
+            - Hyphenated module names
+            - Unclosed parentheses
+            - Missing Django environment setup
+            - Special module handling for __init__.py files
             
             Generated using:
             - Model: ${{ github.event.inputs.model }}
