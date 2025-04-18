@@ -450,9 +450,17 @@ class AITestCorrector:
             traceback.print_exc()
             return False
     
+    def ensure_mock_import(content):
+        """Ensure unittest.mock is properly imported."""
+        if 'mock.MagicMock' in content and 'import mock' not in content and 'from unittest import mock' not in content:
+            # Add import to the beginning of the file
+            return 'from unittest import mock\n' + content
+        return content
+
     def _apply_standard_fixes(self, content, test_file):
         """Menerapkan perbaikan standar pada konten"""
         content = ensure_django_setup(content)
+        content = ensure_mock_import(content) 
         content = fix_import_statements(content)
         content = add_factory_mocks(content)
         content = fix_test_definitions(content)
