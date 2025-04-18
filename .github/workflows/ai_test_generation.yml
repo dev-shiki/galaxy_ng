@@ -11,10 +11,15 @@ on:
       model:
         description: 'SambaNova model to use'
         required: false
-        default: 'Qwen2.5-Coder-32B-Instruct'
+        default: 'Meta-Llama-3.1-8B-Instruct'
         type: string
       create_pr:
         description: 'Create PR with generated tests'
+        required: false
+        default: true
+        type: boolean
+      ai_correction:
+        description: 'Use AI-assisted error correction'
         required: false
         default: true
         type: boolean
@@ -81,6 +86,16 @@ jobs:
           }
           EOF
 
+          # Create pytest.ini to configure pytest
+          cat > pytest.ini << EOF
+          [pytest]
+          testpaths = galaxy_ng
+          python_files = test_*.py
+          python_classes = Test*
+          python_functions = test_*
+          addopts = -p no:pulp_ansible -p no:pulpcore -p no:pulp_smash
+          EOF
+
           # Create directory structure for generated tests
           mkdir -p galaxy_ng/tests/unit/ai_generated/
           touch galaxy_ng/tests/unit/ai_generated/__init__.py
@@ -116,11 +131,28 @@ jobs:
             --model ${{ github.event.inputs.model }} \
             --output-dir generated_tests
       
-      - name: Run Test Fixes
+      - name: Run Test Fixes with AI-assisted correction
+        if: ${{ github.event.inputs.ai_correction == 'true' }}
         run: |
           # Only run the test fixer if there are generated tests
           if [ -d "galaxy_ng/tests/unit/ai_generated" ] && [ "$(ls -A galaxy_ng/tests/unit/ai_generated)" ]; then
-            echo "Fixing generated tests..."
+            echo "Fixing generated tests with AI assistance..."
+            python .github/scripts/fix_test_files.py \
+              --path galaxy_ng/tests/unit/ai_generated \
+              --api-key "$SAMBANOVA_API_KEY" \
+              --model "${{ github.event.inputs.model }}"
+          else
+            echo "No tests to fix."
+          fi
+        env:
+          SAMBANOVA_API_KEY: ${{ secrets.SAMBANOVA_API_KEY }}
+      
+      - name: Run Test Fixes without AI assistance
+        if: ${{ github.event.inputs.ai_correction != 'true' }}
+        run: |
+          # Only run the test fixer if there are generated tests
+          if [ -d "galaxy_ng/tests/unit/ai_generated" ] && [ "$(ls -A galaxy_ng/tests/unit/ai_generated)" ]; then
+            echo "Fixing generated tests with standard fixes..."
             python .github/scripts/fix_test_files.py --path galaxy_ng/tests/unit/ai_generated
           else
             echo "No tests to fix."
@@ -187,8 +219,38 @@ jobs:
       
       - name: Try running generated tests
         run: |
+          # Create a proper conftest.py in the ai_generated directory
+          cat > galaxy_ng/tests/unit/ai_generated/conftest.py << 'EOF'
+          import os
+          import sys
+          import pytest
+
+          # Setup Django environment
+          os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'galaxy_ng.settings')
+
+          # Add project root to path
+          project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
+          if project_root not in sys.path:
+              sys.path.insert(0, project_root)
+
+          # Import Django and setup
+          import django
+          django.setup()
+
+          # Add fixtures here if needed
+          @pytest.fixture
+          def mock_request():
+              from unittest.mock import MagicMock
+              return MagicMock()
+          EOF
+
           # Attempt to collect tests to verify they can be imported
-          python -m pytest galaxy_ng/tests/unit/ai_generated/ --collect-only -v || echo "Some tests can't be collected"
+          python -m pytest galaxy_ng/tests/unit/ai_generated/ \
+            --collect-only \
+            -p no:pulp_ansible \
+            -p no:pulpcore \
+            -p no:pulp_smash \
+            -v || echo "Some tests can't be collected"
       
       - name: Upload generated tests artifact
         uses: actions/upload-artifact@v4
@@ -232,6 +294,7 @@ jobs:
             Generated using:
             - Model: ${{ github.event.inputs.model }}
             - Modules analyzed: ${{ github.event.inputs.limit }}
+            - AI-assisted correction: ${{ github.event.inputs.ai_correction }}
             
             No-Issue
           branch: ai-generated-tests-${{ github.run_id }}

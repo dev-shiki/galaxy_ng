@@ -28,20 +28,22 @@ Your task is to analyze the provided code and generate comprehensive pytest test
 
 CRITICAL GUIDELINES FOR GENERATING VALID TESTS:
 
-1. IMPORTS AND DEPENDENCIES:
-   - NEVER import 'factories' modules directly (they don't exist): ❌ `from galaxy_ng.social import factories`
+1. SYNTAX CORRECTNESS:
+   - ALWAYS end function/class/if/for/while definitions with colon (:)
+   - ALWAYS close all string literals properly with matching quotes
+   - ALWAYS balance parentheses, brackets, and braces
+   - ALWAYS terminate multiline strings properly
+   - NEVER use unterminated string literals like: 'This string is not closed
+   - NEVER leave blocks without a colon: ❌ `def test_function()` ✅ `def test_function():`
+
+2. IMPORTS AND DEPENDENCIES:
+   - NEVER import 'factories' modules directly: ❌ `from galaxy_ng.social import factories`
    - NEVER use incomplete imports: ❌ `from galaxy_module`
    - ALWAYS mock external dependencies: ✅ `module = mock.MagicMock()`
-   - ALWAYS use try/except for potentially problematic imports:
-     ```python
-     try:
-         from galaxy_ng.app.utils.galaxy import get_collection_download_url
-     except ImportError:
-         # Mock the function if import fails
-         get_collection_download_url = mock.MagicMock()
-     ```
+   - ALWAYS use try/except for potentially problematic imports
+   - NEVER use type annotations with assignment, such as: ❌ `var: type = value` or ❌ `var[idx]: type`
 
-2. MOCKING FACTORIES:
+3. MOCKING FACTORIES:
    - ALWAYS mock factories instead of importing them:
      ```python
      # Create mock factories
@@ -51,15 +53,6 @@ CRITICAL GUIDELINES FOR GENERATING VALID TESTS:
      factories.NamespaceFactory = mock.MagicMock()
      factories.CollectionFactory = mock.MagicMock()
      ```
-
-3. SYNTAX AND STRUCTURE:
-   - ALWAYS use proper function definitions: ✅ `def test_something():`
-   - ALWAYS balance all parentheses, brackets, and braces
-   - ALWAYS use proper indentation and formatting
-   - NEVER leave function calls with unclosed parentheses
-   - NEVER use type annotations with assignment, such as: ❌ `var: type = value` or ❌ `var[idx]: type`
-   - NEVER use decorated function definitions without parentheses: ❌ `@pytest.fixture: def my_fixture`
-   - ALWAYS use proper decorator syntax: ✅ `@pytest.fixture() def my_fixture():`
 
 4. DJANGO ENVIRONMENT SETUP:
    - ALWAYS include this exact setup at the top of each test file:
@@ -108,6 +101,12 @@ CRITICAL GUIDELINES FOR GENERATING VALID TESTS:
    - Use descriptive test names that indicate what's being tested
    - Prefer focused tests that test one thing well over large complex tests
 
+BEFORE RETURNING YOUR ANSWER, DOUBLE-CHECK:
+- All string literals are properly closed
+- All function/class definitions end with a colon
+- All parentheses, brackets, and braces are balanced
+- No syntax errors remain in your code
+
 The code is from the Galaxy NG project, which is an Ansible Galaxy server built on Django and Django REST Framework.
 """
 
@@ -151,6 +150,48 @@ def read_file_content(file_path):
         print(f"Error reading file {file_path}: {e}")
         return None
 
+def locate_module_file(module_path):
+    """
+    Try to locate a module file using different approaches.
+    Returns the actual file path if found, or None if not found.
+    """
+    # Try the exact path first
+    if os.path.exists(module_path):
+        return module_path
+    
+    # Try the normalized path (with galaxy_ng prefix)
+    fixed_path = fix_module_path(module_path)
+    if os.path.exists(fixed_path):
+        return fixed_path
+    
+    # Try alternative names (handle hyphen/underscore variations)
+    base_name = os.path.basename(module_path)
+    dir_path = os.path.dirname(fixed_path)
+    
+    # If filename has hyphens, try with underscores
+    if '-' in base_name:
+        alt_name = base_name.replace('-', '_')
+        alt_path = os.path.join(dir_path, alt_name)
+        if os.path.exists(alt_path):
+            return alt_path
+    
+    # If filename has underscores, try with hyphens
+    if '_' in base_name:
+        alt_name = base_name.replace('_', '-')
+        alt_path = os.path.join(dir_path, alt_name)
+        if os.path.exists(alt_path):
+            return alt_path
+    
+    # Try a glob search in the directory
+    import glob
+    glob_pattern = os.path.join(dir_path, f"*{os.path.splitext(base_name)[0]}*{os.path.splitext(base_name)[1]}")
+    matches = glob.glob(glob_pattern)
+    if matches:
+        return matches[0]
+    
+    # If all else fails, return None
+    return None
+
 def get_existing_tests(module_path):
     """Find existing test files for the given module."""
     try:
@@ -192,7 +233,6 @@ def create_test_template(module_path):
     
     return f'''import os
 import sys
-import re
 import pytest
 from unittest import mock
 
@@ -362,6 +402,139 @@ def fix_test_definitions(content):
     
     return fixed_content
 
+def fix_annotation_syntax(content):
+    """Fix common annotation syntax errors in AI-generated tests."""
+    # Fix variable assignments using annotation syntax
+    content = re.sub(
+        r'(\w+)\s*:\s*=\s*(.+)',  # Find patterns like "var : = value"
+        r'\1 = \2',  # Replace with "var = value"
+        content
+    )
+    
+    # Fix illegal annotation targets
+    content = re.sub(
+        r'(\w+)\[(.*?)\]\s*:\s*(.+)',  # Find patterns like "var[idx]: type"
+        r'\1[\2] = \3',  # Replace with "var[idx] = value" 
+        content
+    )
+    
+    # Fix fixture annotations without parentheses
+    content = re.sub(
+        r'@pytest\.fixture\s*:\s*',
+        r'@pytest.fixture()\ndef ',
+        content
+    )
+    
+    # Fix mark annotations without parentheses
+    content = re.sub(
+        r'@pytest\.mark\.(\w+)\s*:\s*',
+        r'@pytest.mark.\1()\ndef ',
+        content
+    )
+    
+    # Fix incorrect type hints
+    content = re.sub(
+        r'def\s+(\w+)\s*\(\s*([^)]*)\s*\)\s*:\s*([^:]+):',
+        r'def \1(\2):  # Return type: \3',
+        content
+    )
+    
+    return content
+
+def fix_advanced_syntax_errors(content):
+    """
+    Fix more complex syntax errors with a multi-stage approach.
+    This includes unclosed strings, statements missing colons, etc.
+    """
+    lines = content.splitlines()
+    fixed_lines = []
+    
+    # State variables for multi-line processing
+    in_multiline_string = False
+    string_quote_type = None
+    unclosed_blocks = []
+    
+    for i, line in enumerate(lines):
+        fixed_line = line
+        
+        # Fix 1: Missing colons at end of function/class/conditional statements
+        if not in_multiline_string:
+            # Detect statements that should end with a colon
+            colon_pattern = r'^\s*(def|class|if|elif|else|for|while|try|except|finally|with)\s+.*\)\s*$'
+            if re.match(colon_pattern, fixed_line):
+                fixed_line += ':'
+            
+            # Detect statements that should end with a colon (no parentheses version)
+            colon_pattern2 = r'^\s*(else|try|finally)\s*$'
+            if re.match(colon_pattern2, fixed_line):
+                fixed_line += ':'
+        
+        # Fix 2: Handle unclosed string literals
+        if not in_multiline_string:
+            # Check for opening quotes
+            single_quotes = fixed_line.count("'")
+            double_quotes = fixed_line.count('"')
+            
+            # Simple case: odd number of quotes of the same type in a line
+            if single_quotes % 2 == 1 and '"' not in fixed_line:
+                fixed_line += "'"
+                
+            elif double_quotes % 2 == 1 and "'" not in fixed_line:
+                fixed_line += '"'
+                
+            # More complex case: detect multiline strings
+            elif '"""' in fixed_line or "'''" in fixed_line:
+                if fixed_line.count('"""') % 2 == 1:
+                    in_multiline_string = True
+                    string_quote_type = '"""'
+                elif fixed_line.count("'''") % 2 == 1:
+                    in_multiline_string = True
+                    string_quote_type = "'''"
+        else:
+            # Check for closing quotes of multiline string
+            if string_quote_type in fixed_line:
+                in_multiline_string = False
+                string_quote_type = None
+            elif i == len(lines) - 1:
+                # Last line with unclosed multiline string
+                fixed_line += string_quote_type
+                in_multiline_string = False
+        
+        # Fix 3: Handle unclosed function calls
+        if not in_multiline_string:
+            # Count opening and closing parentheses
+            open_paren = fixed_line.count('(')
+            close_paren = fixed_line.count(')')
+            
+            # If there are unclosed parentheses on this line
+            if open_paren > close_paren:
+                # Add to unclosed blocks stack
+                unclosed_blocks.append(('(', open_paren - close_paren))
+            elif close_paren > open_paren:
+                # Close excess parentheses from previous lines
+                excess = close_paren - open_paren
+                while excess > 0 and unclosed_blocks:
+                    block_type, count = unclosed_blocks.pop()
+                    if block_type == '(' and count <= excess:
+                        excess -= count
+                    else:
+                        unclosed_blocks.append((block_type, count - excess))
+                        excess = 0
+        
+        fixed_lines.append(fixed_line)
+    
+    # Close any remaining unclosed blocks at the end of the file
+    if unclosed_blocks:
+        for block_type, count in reversed(unclosed_blocks):
+            if block_type == '(':
+                fixed_lines[-1] += ')' * count
+    
+    # Handle any unclosed multiline string at the end of the file
+    if in_multiline_string and string_quote_type:
+        fixed_lines[-1] += string_quote_type
+    
+    return '\n'.join(fixed_lines)
+
 def validate_and_fix_test(test_content, module_path):
     """Validate and fix common test issues."""
     
@@ -386,51 +559,21 @@ def validate_and_fix_test(test_content, module_path):
     # 3. Fix test function definitions
     fixed_content = fix_test_definitions(fixed_content)
     
-    # 4. Add handling for special modules
+    # 4. Fix annotation syntax
+    fixed_content = fix_annotation_syntax(fixed_content)
+    
+    # 5. Add handling for special modules
     module_name = os.path.basename(module_path)
     if module_name == '__init__.py' or 'social/__init__' in module_path:
         fixed_content = handle_special_modules(fixed_content, module_path)
     
-    # 5. Balance parentheses, brackets, and braces
+    # 6. Balance parentheses, brackets, and braces
     fixed_content = balance_parentheses(fixed_content)
     
-    # NEW: Fix annotation syntax errors - common in AI generated code
-    fixed_content = re.sub(
-        r'(\w+)\s*:\s*=\s*(.+)',  # Find patterns like "var : = value"
-        r'\1 = \2',  # Replace with "var = value"
-        fixed_content
-    )
+    # 7. Fix advanced syntax errors
+    fixed_content = fix_advanced_syntax_errors(fixed_content)
     
-    # NEW: Fix illegal annotation targets
-    fixed_content = re.sub(
-        r'(\w+)\[(.*?)\]\s*:\s*(.+)',  # Find patterns like "var[idx]: type"
-        r'\1[\2] = \3',  # Replace with "var[idx] = value"
-        fixed_content
-    )
-    
-    # NEW: Fix fixture annotations without parentheses
-    fixed_content = re.sub(
-        r'@pytest\.fixture\s*:\s*',
-        r'@pytest.fixture()\ndef ',
-        fixed_content
-    )
-    
-    # NEW: Fix mark annotations without parentheses
-    fixed_content = re.sub(
-        r'@pytest\.mark\.(\w+)\s*:\s*',
-        r'@pytest.mark.\1()\ndef ',
-        fixed_content
-    )
-    
-    # 6. Add mock for factories if referenced but not defined
-    if "factories" in fixed_content and "factories = mock.MagicMock()" not in fixed_content:
-        factories_mock = '\n# Mock for factories\nfactories = mock.MagicMock()\nfactories.UserFactory = mock.MagicMock()\nfactories.GroupFactory = mock.MagicMock()\nfactories.NamespaceFactory = mock.MagicMock()\n'
-        if 'import mock' in fixed_content:
-            fixed_content = fixed_content.replace('import mock', 'import mock' + factories_mock)
-        else:
-            fixed_content = 'import mock\n' + factories_mock + fixed_content
-    
-    # 7. Fix module imports for the specific module
+    # 8. Make sure module is imported
     module_import_path = get_module_import_path(module_path)
     if module_import_path not in fixed_content:
         import_statement = f"\n# Import module being tested\ntry:\n    from {module_import_path} import *\nexcept (ImportError, ModuleNotFoundError):\n    # Mock module if import fails\n    sys.modules['{module_import_path}'] = mock.MagicMock()\n\n"
@@ -440,11 +583,11 @@ def validate_and_fix_test(test_content, module_path):
             # Add at the top after environment setup
             fixed_content = create_test_template(module_path) + fixed_content
     
-    # 8. Ensure django.setup() is included
+    # 9. Ensure django.setup() is included
     if 'django.setup()' not in fixed_content:
         fixed_content = create_test_template(module_path) + fixed_content
     
-    # 9. Verify syntax with ast parse
+    # 10. Verify syntax with ast parse
     try:
         ast.parse(fixed_content)
     except SyntaxError as e:
@@ -454,7 +597,7 @@ def validate_and_fix_test(test_content, module_path):
     
     return fixed_content
 
-def generate_test_with_ai(api_key, module_path, module_content, existing_tests=None, model="Qwen2.5-Coder-32B-Instruct"):
+def generate_test_with_ai(api_key, module_path, module_content, existing_tests=None, model="Meta-Llama-3.1-8B-Instruct"):
     """Use SambaNova AI to generate test code."""
     base_url = "https://api.sambanova.ai/v1"
     endpoint = f"{base_url}/chat/completions"
@@ -478,9 +621,7 @@ def generate_test_with_ai(api_key, module_path, module_content, existing_tests=N
     fixed_path = fix_module_path(module_path)
     module_dir = os.path.dirname(fixed_path)
     module_name = os.path.basename(fixed_path).replace('.py', '')
-    test_dir = os.path.join(module_dir, 'tests')
-    if not os.path.exists(test_dir):
-        test_dir = os.path.join('galaxy_ng', 'tests', module_dir.replace('galaxy_ng/', ''))
+    test_dir = os.path.join('galaxy_ng', 'tests', 'unit', 'ai_generated')
     
     # Make sure module_name doesn't have hyphens (problematic for imports)
     module_name = module_name.replace('-', '_')
@@ -514,15 +655,16 @@ Please generate a complete test file that will:
 CRITICAL REQUIREMENTS:
 1. DO NOT use hyphens (-) in import statements or module references - always use underscores (_)
 2. DO NOT assume 'factories' module exists - use mock.MagicMock() to create mock factories
-3. Make sure all test function definitions end with colons and have proper parentheses: def test_something():
-4. ALWAYS balance parentheses, brackets, and braces in your code
-5. For init.py files, use special module mocking to prevent import errors
+3. DO NOT use type annotations with assignment, such as: var: type = value or var[idx]: type = value
+4. Make sure all test function definitions end with colons and have proper parentheses: def test_something():
+5. ALWAYS balance parentheses, brackets, and braces in your code
+6. For init.py files, use special module mocking to prevent import errors
+7. NEVER leave string literals unclosed
 
 Please include this exact Django environment setup:
 ```python
 import os
 import sys
-import re
 import pytest
 from unittest import mock
 
@@ -620,54 +762,12 @@ def save_test_file(test_path, test_content):
         traceback.print_exc()
         return False
 
-def locate_module_file(module_path):
-    """
-    Try to locate a module file using different approaches.
-    Returns the actual file path if found, or None if not found.
-    """
-    # Try the exact path first
-    if os.path.exists(module_path):
-        return module_path
-    
-    # Try the normalized path (with galaxy_ng prefix)
-    fixed_path = fix_module_path(module_path)
-    if os.path.exists(fixed_path):
-        return fixed_path
-    
-    # Try alternative names (handle hyphen/underscore variations)
-    base_name = os.path.basename(module_path)
-    dir_path = os.path.dirname(fixed_path)
-    
-    # If filename has hyphens, try with underscores
-    if '-' in base_name:
-        alt_name = base_name.replace('-', '_')
-        alt_path = os.path.join(dir_path, alt_name)
-        if os.path.exists(alt_path):
-            return alt_path
-    
-    # If filename has underscores, try with hyphens
-    if '_' in base_name:
-        alt_name = base_name.replace('_', '-')
-        alt_path = os.path.join(dir_path, alt_name)
-        if os.path.exists(alt_path):
-            return alt_path
-    
-    # Try a glob search in the directory
-    import glob
-    glob_pattern = os.path.join(dir_path, f"*{os.path.splitext(base_name)[0]}*{os.path.splitext(base_name)[1]}")
-    matches = glob.glob(glob_pattern)
-    if matches:
-        return matches[0]
-    
-    # If all else fails, return None
-    return None
-
 def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Generate tests using AI for low-coverage modules')
     parser.add_argument('--candidates', required=True, help='Path to the JSON file with test candidates')
     parser.add_argument('--api-key', help='SambaNova API key (falls back to SAMBANOVA_API_KEY env var)')
-    parser.add_argument('--model', default='Qwen2.5-Coder-32B-Instruct', help='AI model to use')
+    parser.add_argument('--model', default='Meta-Llama-3.1-8B-Instruct', help='AI model to use')
     parser.add_argument('--output-dir', default='generated_tests', help='Directory to store generated tests')
     parser.add_argument('--limit', type=int, default=5, help='Maximum number of modules to process')
     
@@ -706,12 +806,8 @@ def main():
         
         print(f"\n[{i}/{len(candidates)}] Processing {filename} (Coverage: {candidate['coverage_pct']:.2f}%)")
         
-        # Fix the path to match repository structure
-        fixed_path = fix_module_path(filename)
-        print(f"Looking for file at: {fixed_path}")
-
-        # Use enhanced file location
-        actual_file_path = locate_module_file(fixed_path)
+        # Try to locate the module file
+        actual_file_path = locate_module_file(filename)
         if not actual_file_path:
             print(f"Skipping {filename} - could not locate file")
             results.append({
@@ -720,6 +816,8 @@ def main():
                 'message': 'Could not locate file'
             })
             continue
+        
+        print(f"Found file at: {actual_file_path}")
         
         # Read the module content
         module_content = read_file_content(actual_file_path)
@@ -731,7 +829,7 @@ def main():
                 'message': 'Could not read file'
             })
             continue
-                
+        
         # Find existing tests
         existing_tests = get_existing_tests(filename)
         if existing_tests:
@@ -753,14 +851,8 @@ def main():
             continue
         
         # Determine the test file path
-        module_dir = os.path.dirname(fixed_path)
-        module_name = os.path.basename(fixed_path).replace('.py', '').replace('-', '_')
-        
-        # First try module's own tests directory
-        test_dir = os.path.join(module_dir, 'tests')
-        if not os.path.exists(test_dir):
-            # Then try a common tests directory structure
-            test_dir = os.path.join('galaxy_ng', 'tests', 'unit', 'ai_generated')
+        module_name = os.path.basename(filename).replace('.py', '').replace('-', '_')
+        test_dir = os.path.join('galaxy_ng', 'tests', 'unit', 'ai_generated')
         
         # Create directory structure if it doesn't exist
         os.makedirs(test_dir, exist_ok=True)
