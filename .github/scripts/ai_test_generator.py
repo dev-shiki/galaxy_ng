@@ -22,92 +22,73 @@ REQUEST_TIMEOUT = 60  # seconds
 
 # Default system prompt for AI test generation
 def update_system_prompt():
-    """Create a comprehensive system prompt for AI test generation."""
-    return """You are an expert Python developer specializing in writing pytest tests for Django applications.
-Your task is to analyze the provided code and generate comprehensive pytest tests that follow these strict rules:
+    """Create a comprehensive system prompt for AI test generation that produces tests with better coverage."""
+    return """You are an expert Python developer specializing in writing highly effective pytest tests for Django applications.
+Your task is to analyze the provided code and generate comprehensive pytest tests that maximize code coverage and follow these strict rules:
 
-CRITICAL GUIDELINES FOR GENERATING VALID TESTS:
+CRITICAL GUIDELINES FOR GENERATING HIGH-COVERAGE TESTS:
 
-1. SYNTAX CORRECTNESS:
-   - ALWAYS end function/class/if/for/while definitions with colon (:)
-   - ALWAYS close all string literals properly with matching quotes
-   - ALWAYS balance parentheses, brackets, and braces
-   - ALWAYS terminate multiline strings properly
-   - NEVER use unterminated string literals like: 'This string is not closed
-   - NEVER leave blocks without a colon: ❌ `def test_function()` ✅ `def test_function():`
+1. FOCUS ON REAL CODE EXECUTION:
+   - DON'T mock the module under test - the goal is to execute the real code to increase coverage
+   - Only mock external dependencies that would be problematic in a test environment
+   - Use real objects when possible rather than mocks
+   - Create tests that exercise different execution paths in the code
 
-2. IMPORTS AND DEPENDENCIES:
-   - NEVER import 'factories' modules directly: ❌ `from galaxy_ng.social import factories`
-   - NEVER use incomplete imports: ❌ `from galaxy_module`
-   - ALWAYS mock external dependencies: ✅ `module = mock.MagicMock()`
-   - ALWAYS use try/except for potentially problematic imports
-   - NEVER use type annotations with assignment, such as: ❌ `var: type = value` or ❌ `var[idx]: type`
+2. TEST BEHAVIOR, NOT STRUCTURE:
+   - Focus on what the code DOES, not just that functions were called
+   - Test the actual outputs and side effects of functions
+   - Verify all return values with specific assertions
+   - Include edge cases, boundary values, and error conditions
 
-3. MOCKING FACTORIES:
-   - ALWAYS mock factories instead of importing them:
-     ```python
-     # Create mock factories
-     factories = mock.MagicMock()
-     factories.UserFactory = mock.MagicMock(return_value=mock.MagicMock(username="test_user"))
-     factories.GroupFactory = mock.MagicMock()
-     factories.NamespaceFactory = mock.MagicMock()
-     factories.CollectionFactory = mock.MagicMock()
-     ```
+3. SMART USE OF MOCKING:
+   - Only mock external services, APIs, or databases that cannot be easily used in tests
+   - Avoid creating test files that import a module and immediately mock it completely
+   - Use patch() as a context manager or decorator for specific external dependencies
+   - Set meaningful return values for mocked methods that match real behavior
 
 4. DJANGO ENVIRONMENT SETUP:
-   - ALWAYS include this exact setup at the top of each test file:
-     ```python
-     import os
-     import sys
-     import pytest
-     from unittest import mock
+   - Include proper Django environment setup at the top of each test file
+   - Use pytest fixtures to set up database state
+   - Leverage pytest.mark.django_db for tests that need database access
 
-     # Setup Django environment
-     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'galaxy_ng.settings')
-     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
-     if project_root not in sys.path:
-         sys.path.insert(0, project_root)
+5. ENSURE COMPREHENSIVE COVERAGE:
+   - Write multiple tests for functions with branching logic
+   - Test all conditional branches (if/else paths)
+   - Test exception handling with pytest.raises()
+   - Include parameterized tests for functions that handle different input types
 
-     import django
-     django.setup()
+Remember: The goal is to INCREASE code coverage, which requires tests to execute the actual code paths, not just mock them.
 
-     # Use pytest marks for Django database handling
-     pytestmark = pytest.mark.django_db
-     ```
+Here's an example of a good test vs. a poor test for coverage:
 
-5. SPECIAL MODULE HANDLING:
-   - For __init__.py files, use system module mocking:
-     ```python
-     # Mock modules accessed in __init__.py
-     import sys
-     social_auth = mock.MagicMock()
-     sys.modules['galaxy_ng.social.auth'] = social_auth
-     ```
-   - For Django model tests, use proper model mocking:
-     ```python
-     # Mock Django models
-     model_mock = mock.MagicMock()
-     model_mock.objects.get.return_value = mock.MagicMock(name="mocked_object")
-     model_mock.DoesNotExist = Exception
-     ```
+POOR (won't improve coverage):
+```python
+def test_function_called():
+    # This only verifies the function was called, but doesn't test its logic
+    with mock.patch('module.function') as mock_func:
+        result = some_code_that_calls_function()
+        mock_func.assert_called_once()
+```
 
-6. FILE NAMING AND MODULE REFERENCES:
-   - NEVER use hyphens (-) in import statements or file references - always use underscores (_)
-   - Normalize all module paths: ✅ `galaxy_ng.app.utils.galaxy` ❌ `galaxy_ng.app.utils-galaxy`
-
-7. TESTING APPROACH:
-   - Create separate test functions for each method/function being tested
-   - Include tests for success cases, error cases, and edge cases
-   - Use descriptive test names that indicate what's being tested
-   - Prefer focused tests that test one thing well over large complex tests
-
-BEFORE RETURNING YOUR ANSWER, DOUBLE-CHECK:
-- All string literals are properly closed
-- All function/class definitions end with a colon
-- All parentheses, brackets, and braces are balanced
-- No syntax errors remain in your code
-
-The code is from the Galaxy NG project, which is an Ansible Galaxy server built on Django and Django REST Framework.
+GOOD (improves coverage):
+```python
+def test_function_normal_case():
+    # This runs the actual code and verifies results
+    input_value = "test input"
+    result = function(input_value)
+    assert result == expected_output
+    
+def test_function_edge_case():
+    # This tests another branch in the code
+    input_value = ""
+    result = function(input_value) 
+    assert result == expected_edge_case_output
+    
+def test_function_error_handling():
+    # This tests exception handling
+    with pytest.raises(ValueError):
+        function(None)
+```
 """
 
 def normalize_module_path(module_path):
@@ -227,9 +208,8 @@ def get_existing_tests(module_path):
         print(f"Error finding existing tests: {e}")
         return []
 
-def create_test_template(module_path):
-    """Create a robust test template with proper imports."""
-    module_import_path = get_module_import_path(module_path)
+def create_test_template(module_path, module_import_path):
+    """Create a robust test template that minimizes mocking and focuses on real code execution."""
     
     return f'''import os
 import sys
@@ -248,28 +228,33 @@ django.setup()
 # Use pytest marks for Django database handling
 pytestmark = pytest.mark.django_db
 
-# Safe imports with fallbacks for the module being tested
-try:
-    from {module_import_path} import *
-except (ImportError, ModuleNotFoundError) as e:
-    print(f"Warning: Could not import {module_import_path}: {{e}}")
-    # Mock the module since we can't import it directly
-    sys.modules['{module_import_path}'] = mock.MagicMock()
+# Import the actual module being tested - don't mock it
+from {module_import_path} import *
 
-# Mock commonly used dependencies
-class MockFactory(mock.MagicMock):
-    """Generic factory mock for testing."""
-    @classmethod
-    def create(cls, **kwargs):
-        return mock.MagicMock(**kwargs)
-        
-# Use this if factories import fails
-if 'factories' not in globals():
-    factories = mock.MagicMock()
-    factories.UserFactory = MockFactory
-    factories.GroupFactory = MockFactory
-    factories.NamespaceFactory = MockFactory
-    factories.CollectionFactory = MockFactory
+# Set up fixtures for common dependencies
+
+@pytest.fixture
+def mock_request():
+    """Fixture for a mocked request object."""
+    return mock.MagicMock(
+        user=mock.MagicMock(
+            username="test_user",
+            is_superuser=False,
+            is_authenticated=True
+        )
+    )
+
+@pytest.fixture
+def mock_superuser():
+    """Fixture for a superuser request."""
+    return mock.MagicMock(
+        username="admin_user",
+        is_superuser=True,
+        is_authenticated=True
+    )
+
+# Add test functions below
+# Remember to test different cases and execution paths to maximize coverage
 '''
 
 def balance_parentheses(content):
@@ -628,7 +613,7 @@ def generate_test_with_ai(api_key, module_path, module_content, existing_tests=N
     test_file_path = os.path.join(test_dir, f'test_{module_name}.py')
     
     # Build user prompt
-    user_prompt = f"""I need comprehensive pytest tests for the following Python module from the Galaxy NG project.
+    user_prompt = f"""I need pytest tests with HIGH CODE COVERAGE for the following Python module from the Galaxy NG project.
 
 MODULE PATH: {fixed_path}
 
@@ -643,42 +628,44 @@ MODULE CODE:
 {"EXISTING TEST FILES:" if existing_test_content else ""}
 {existing_test_content if existing_test_content else ""}
 
-Please generate a complete test file that will:
-1. Be saved to: {test_file_path}
-2. Include proper Django environment setup at the beginning of the file
-3. Include all necessary imports and mocks
-4. Test each function/method with multiple test cases
-5. Achieve high code coverage by testing all code paths, including error conditions
-6. Follow Django and pytest best practices
-7. Use clear, descriptive test names
+Please generate a COMPLETE test file that will be saved to: {test_file_path}
 
-CRITICAL REQUIREMENTS:
-1. DO NOT use hyphens (-) in import statements or module references - always use underscores (_)
-2. DO NOT assume 'factories' module exists - use mock.MagicMock() to create mock factories
-3. DO NOT use type annotations with assignment, such as: var: type = value or var[idx]: type = value
-4. Make sure all test function definitions end with colons and have proper parentheses: def test_something():
-5. ALWAYS balance parentheses, brackets, and braces in your code
-6. For init.py files, use special module mocking to prevent import errors
-7. NEVER leave string literals unclosed
+IMPORTANT COVERAGE GUIDELINES:
+1. Your tests should EXECUTE THE ACTUAL CODE to increase coverage metrics
+2. DON'T mock the module under test - mock only external dependencies
+3. TEST ALL LOGICAL BRANCHES including error cases, edge conditions and happy paths
+4. Include MULTIPLE TEST CASES for functions with branching logic
+5. TEST THE ACTUAL BEHAVIOR AND OUTPUTS of functions, not just that they were called
+6. Use assertions that verify return values and side effects
 
-Please include this exact Django environment setup:
+TESTING STRUCTURE:
+1. Include proper Django environment setup at the top of the file
+2. Create meaningful pytest fixtures for common test data
+3. Follow test function naming convention: test_function_name_scenario()
+4. Group tests logically by function or behavior
+5. Use pytest.mark.parametrize for testing similar behaviors with different inputs
+
+EXAMPLES OF GOOD COVERAGE TESTS:
 ```python
-import os
-import sys
-import pytest
-from unittest import mock
+def test_uuid_to_int_converts_valid_uuid():
+    # Direct test of behavior with assertion on result
+    test_uuid = "12345678-1234-1234-1234-123456789012"
+    result = uuid_to_int(test_uuid)
+    assert result == 0x123456781234123412341234123456789012
 
-# Setup Django environment
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'galaxy_ng.settings')
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
-import django
-django.setup()
-
-# Use pytest marks for Django database handling
-pytestmark = pytest.mark.django_db
+def test_uuid_to_int_raises_error_for_invalid_uuid():
+    # Tests error branch
+    with pytest.raises(ValueError):
+        uuid_to_int("invalid-uuid")
+    
+@pytest.mark.parametrize("input_value,expected", [
+    ("value1", "result1"),
+    ("value2", "result2"),
+    ("", "empty_result")
+])
+def test_function_with_different_inputs(input_value, expected):
+    # Tests multiple scenarios for better coverage
+    assert function(input_value) == expected
 ```
 
 Return ONLY the Python test code without explanations or markdown formatting.

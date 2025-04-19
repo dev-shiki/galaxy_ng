@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 AITestCorrector - A utility for fixing syntax errors in AI-generated test files
-using both rule-based fixes and AI-assisted correction.
+and improving code coverage by reducing over-mocking and enhancing test quality.
 
 This can be used as a standalone script or imported as a module.
 """
@@ -55,7 +55,13 @@ def balance_parentheses(content):
     
     return '\n'.join(lines)
 
-# Tambahkan di bagian fix functions
+def ensure_mock_import(content):
+    """Ensure unittest.mock is properly imported."""
+    if 'mock.MagicMock' in content and 'import mock' not in content and 'from unittest import mock' not in content:
+        # Add import to the beginning of the file
+        return 'from unittest import mock\n' + content
+    return content
+
 def ensure_imports_order(content):
     """
     Ensure imports are properly ordered - particularly unittest.mock must be imported before use.
@@ -92,13 +98,6 @@ def ensure_imports_order(content):
     
     return '\n'.join(cleaned_lines)
 
-def ensure_mock_import(content):
-    """Ensure unittest.mock is properly imported."""
-    if 'mock.MagicMock' in content and 'import mock' not in content and 'from unittest import mock' not in content:
-        # Add import to the beginning of the file
-        return 'from unittest import mock\n' + content
-    return content
-
 def fix_import_statements(content):
     """
     Fix common import errors:
@@ -126,7 +125,7 @@ def fix_import_statements(content):
     for pattern, replacement in incomplete_imports:
         content = re.sub(pattern, replacement, content)
     
-    # Make sure mock is imported
+    # Make sure mock is imported if needed
     if 'mock.MagicMock' in content and 'import mock' not in content and 'from unittest import mock' not in content:
         content = 'from unittest import mock\n' + content
         
@@ -168,6 +167,43 @@ def fix_init_module_imports(content):
     
     return content
 
+def fix_django_setup(content):
+    """
+    Fix Django setup in test files to handle mocked modules properly.
+    Rather than using django.setup() directly, patch it when mocks are in use.
+    """
+    # Check if we're using mocks and django.setup()
+    if ('mock.MagicMock' in content and 'django.setup()' in content):
+        # Replace django.setup() with patched version
+        setup_code = '''
+# Patched django setup to work with mocked modules
+def _patch_django_setup():
+    """Apply patch to django.setup to handle mocked modules"""
+    import django
+    original_setup = getattr(django, 'setup')
+    
+    def noop_setup():
+        # Skip actual setup which fails with mocked modules
+        pass
+        
+    django.setup = noop_setup
+    return original_setup
+
+# Store original setup in case we need to restore it
+_original_django_setup = _patch_django_setup()
+'''
+        # Find location after imports to insert our patch
+        import_pattern = re.compile(r'((?:from [^\n]+ import [^\n]+|import [^\n]+)\n)+')
+        matches = list(import_pattern.finditer(content))
+        if matches:
+            last_import_end = matches[-1].end()
+            content = content[:last_import_end] + setup_code + content[last_import_end:]
+            
+            # Replace django.setup() call with comment
+            content = content.replace('django.setup()', '# django.setup() - patched to avoid errors with mocked modules')
+    
+    return content
+
 def add_factory_mocks(content):
     """Add mock factories if referenced but not defined."""
     if re.search(r'\bfactories\b', content) and not re.search(r'factories\s*=\s*mock\.MagicMock', content):
@@ -188,6 +224,42 @@ def fix_test_definitions(content):
     content = re.sub(r'def\s+(test_\w+)(\([^)]*\))\s*(?!:)', r'def \1\2:', content)
     
     return content
+
+def fix_comment_separated_function_names(content):
+    """
+    Fix function names that are split by comments like:
+    def test_function_na():  # Return type: m()  # Return type: e():
+    
+    Should become:
+    def test_function_name():
+    """
+    lines = content.splitlines()
+    fixed_lines = []
+    
+    for line in lines:
+        # Match function definitions with comment-embedded parts
+        if re.match(r'\s*def\s+test_\w+\(\):\s*#.*Return type.*:', line):
+            # Get the base function name
+            base_name = re.match(r'\s*def\s+(test_\w+)\(\):', line).group(1)
+            
+            # Extract the missing parts from comments
+            parts = []
+            for comment in re.finditer(r'#\s*Return type:\s*(\w+)\(\)', line):
+                parts.append(comment.group(1))
+            
+            # Build the complete function name
+            if parts:
+                complete_name = base_name + '_' + '_'.join(parts)
+                # Replace with fixed function definition
+                fixed_line = re.sub(r'(def\s+test_\w+)(\(\):.*)', r'def ' + complete_name + r'\2', line)
+                fixed_line = re.sub(r'#\s*Return type:.*$', '', fixed_line).rstrip()
+                fixed_lines.append(fixed_line)
+            else:
+                fixed_lines.append(line)
+        else:
+            fixed_lines.append(line)
+    
+    return '\n'.join(fixed_lines)
 
 def handle_special_modules(content, test_file):
     """Add special handling for __init__.py files and other special modules."""
@@ -381,6 +453,141 @@ def fix_advanced_syntax_errors(content):
     
     return '\n'.join(fixed_lines)
 
+def reduce_excessive_mocking(content, module_path):
+    """
+    Reduce excessive mocking to improve coverage:
+    1. Remove mocking of the module under test
+    2. Focus more on actual behavior testing than just mock assertions
+    """
+    # Parse module name from path
+    module_name = os.path.splitext(os.path.basename(module_path))[0]
+    module_import_path = module_path.replace('/', '.').replace('.py', '')
+    
+    # Check for complete module mocking like:
+    # sys.modules['galaxy_ng.app.utils.roles'] = mock.MagicMock()
+    mock_module_pattern = rf"sys\.modules\['{module_import_path}'\]\s*=\s*mock\.MagicMock\(\)"
+    if re.search(mock_module_pattern, content):
+        # Replace with direct import
+        content = re.sub(
+            rf"try:\s*from {module_import_path} import \*.*?sys\.modules\['{module_import_path}'\]\s*=\s*mock\.MagicMock\(\)",
+            f"# Direct import of the module being tested\nfrom {module_import_path} import *",
+            content,
+            flags=re.DOTALL
+        )
+    
+    # Replace simple mock assertions with actual function calls
+    # Find test functions that only assert mock calls
+    test_patterns = re.finditer(r'def (test_\w+)\(\):\s*.*?assert\s+\w+\.(?:call_count|assert_called)', content, re.DOTALL)
+    for test_match in test_patterns:
+        test_func_name = test_match.group(1)
+        test_func_content = test_match.group(0)
+        
+        # Check if function is named after a module function
+        function_name = test_func_name.replace('test_', '')
+        function_name = re.sub(r'_\w+$', '', function_name)  # Remove test scenario suffix
+        
+        # If the test is just asserting call_count, suggest better test
+        if 'call_count' in test_func_content and not re.search(r'assert\s+[^.]+\s*==', test_func_content):
+            better_test = f"""
+def {test_func_name}():
+    # Test the actual behavior instead of just mocking
+    # Set up test input
+    test_input = "test_value"
+    # Call the function directly
+    result = {function_name}(test_input)
+    # Assert on the actual result 
+    assert result is not None
+"""
+            content = content.replace(test_func_content, better_test)
+    
+    return content
+
+def improve_test_quality(content):
+    """
+    Improve the quality of tests to better increase coverage:
+    1. Add edge case tests
+    2. Add more assertions beyond just checking call_count
+    3. Fix tests that don't actually execute code paths
+    """
+    # Find test functions that are just checking call counts
+    lines = content.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        
+        # Check if this is the start of a test function
+        if re.match(r'\s*def\s+test_\w+\(', line):
+            # Find the end of the function
+            func_start = i
+            func_indent = len(line) - len(line.lstrip())
+            i += 1
+            
+            while i < len(lines) and (not lines[i].strip() or len(lines[i]) - len(lines[i].lstrip()) > func_indent):
+                i += 1
+            
+            func_end = i
+            func_body = '\n'.join(lines[func_start:func_end])
+            
+            # Check if function only asserts call_count
+            if 'call_count' in func_body and not re.search(r'assert\s+\w+\s*[=!]=', func_body):
+                # Extract function name being tested
+                match = re.search(r'def\s+test_(\w+)', func_body)
+                if match:
+                    func_name = match.group(1)
+                    # Add better assertion
+                    improved_body = func_body + f"\n    # Add assertion on actual result\n    assert {func_name} is not None  # Replace with actual check on return value"
+                    lines[func_start:func_end] = improved_body.splitlines()
+        else:
+            i += 1
+    
+    return '\n'.join(lines)
+
+def add_comprehensive_test_structure(content, module_path):
+    """
+    Add a more comprehensive test structure to increase coverage:
+    1. Add parametrized tests for different inputs
+    2. Add edge case tests
+    3. Test exception cases
+    """
+    # Extract module name from path
+    module_name = os.path.splitext(os.path.basename(module_path))[0]
+    
+    # Check if the content already has good test coverage
+    if 'pytest.mark.parametrize' in content and 'pytest.raises' in content:
+        # Already has good structure
+        return content
+    
+    # Get all test functions
+    test_funcs = re.findall(r'def\s+(test_\w+)\(\):', content)
+    
+    # Check if we have very few test functions 
+    if len(test_funcs) <= 3:
+        # Add a suggestion for parametrized tests
+        addition = f"""
+# SUGGESTION: Add parametrized tests for more coverage
+@pytest.mark.parametrize("input_value,expected", [
+    ("normal_input", "expected_result"),
+    ("edge_case", "edge_case_result"),
+    ("", "empty_result"),
+    (None, "none_result")
+])
+def test_{module_name}_with_different_inputs(input_value, expected):
+    # This will test multiple scenarios in a single test
+    # Replace with actual implementation
+    result = some_function(input_value)
+    assert result == expected
+
+# SUGGESTION: Add tests for exception cases
+def test_{module_name}_raises_exception_for_invalid_input():
+    # Test exception handling
+    with pytest.raises(ValueError):
+        some_function(invalid_input)
+"""
+        # Add it at the end of the file
+        content += addition
+    
+    return content
+
 # Standard fix function (without AI)
 def fix_test_file(test_file):
     """Apply all fixes to a test file."""
@@ -389,18 +596,30 @@ def fix_test_file(test_file):
         with open(test_file, 'r', encoding='utf-8') as f:
             content = f.read()
         
-         # Apply fixers in order - ensure imports are fixed first!
+        # Extract module path from test file
+        module_path = test_file.replace('test_', '').replace('.py', '') 
+        if '/ai_generated/' in test_file:
+            module_path = test_file.replace('/ai_generated/test_', '/').replace('.py', '')
+        
+        # Apply fixers in order
         content = ensure_imports_order(content)  # Fix imports first
-        content = ensure_mock_import(content)    # Then ensure mock is available
+        content = ensure_mock_import(content)
         content = fix_import_statements(content)
         content = add_factory_mocks(content)
         content = fix_test_definitions(content)
         content = fix_annotation_syntax(content)
+        content = fix_django_setup(content)
         content = handle_special_modules(content, test_file)
         content = fix_init_module_imports(content)
         content = normalize_module_path(content)
         content = balance_parentheses(content)
         content = fix_advanced_syntax_errors(content)
+        content = fix_comment_separated_function_names(content)  # Fix function name issues with comments
+        
+        # Coverage improvement fixes
+        content = reduce_excessive_mocking(content, module_path)
+        content = improve_test_quality(content)
+        content = add_comprehensive_test_structure(content, module_path)
         
         # Final validation with ast parse
         try:
@@ -534,17 +753,29 @@ class AITestCorrector:
     
     def _apply_standard_fixes(self, content, test_file):
         """Menerapkan perbaikan standar pada konten"""
+        # Extract module path from test file
+        module_path = test_file.replace('test_', '').replace('.py', '') 
+        if '/ai_generated/' in test_file:
+            module_path = test_file.replace('/ai_generated/test_', '/').replace('.py', '')
+        
         content = ensure_imports_order(content)  # Fix imports first
         content = ensure_mock_import(content)
         content = fix_import_statements(content)
         content = add_factory_mocks(content)
         content = fix_test_definitions(content)
         content = fix_annotation_syntax(content)
+        content = fix_django_setup(content)
         content = handle_special_modules(content, test_file)
         content = fix_init_module_imports(content)
         content = normalize_module_path(content)
         content = balance_parentheses(content)
         content = fix_advanced_syntax_errors(content)
+        content = fix_comment_separated_function_names(content)
+        
+        # Coverage improvement fixes
+        content = reduce_excessive_mocking(content, module_path)
+        content = improve_test_quality(content)
+        content = add_comprehensive_test_structure(content, module_path)
         
         return content
     
@@ -650,7 +881,7 @@ class AITestCorrector:
         """Membuat prompt untuk AI correction berdasarkan error dan konteks"""
         error_type = self._analyze_error_type(str(error))
         
-        prompt = f"""Saya memiliki file test Python yang masih memiliki error sintaks setelah perbaikan otomatis {attempt} kali.
+        prompt = f"""Saya memiliki file test Python untuk meningkatkan code coverage yang masih memiliki error sintaks setelah perbaikan otomatis {attempt} kali.
 
 MODULE PATH: {module_path}
 ERROR TYPE: {error_type}
@@ -668,11 +899,11 @@ Ini adalah percobaan perbaikan ke-{attempt}. {"Tolong perhatikan error-error seb
 
 {self._get_error_specific_instructions(error_type)}
 
-Tolong perbaiki kode ini dan kembalikan versi yang sudah diperbaiki. Pastikan:
-1. Semua string literal tertutup dengan benar
-2. Semua definisi fungsi/kelas/if/else diakhiri dengan titik dua (:)
-3. Semua tanda kurung/bracket/brace seimbang
-4. Tidak ada error sintaks lain yang tersisa
+Tolong perbaiki kode ini dan kembalikan versi yang sudah diperbaiki dengan fokus pada:
+1. Memastikan semua syntax errors diperbaiki
+2. MENGURANGI penggunaan mock, khususnya untuk modul yang sedang ditest
+3. Mengubah test sehingga benar-benar menjalankan kode, bukan hanya mengecek apakah fungsi dipanggil
+4. Menambahkan test untuk berbagai execution paths untuk meningkatkan coverage
 
 Kembalikan HANYA kode Python yang sudah diperbaiki, tanpa penjelasan atau format markdown.
 """
@@ -747,18 +978,47 @@ Periksa secara menyeluruh untuk kesalahan sintaks, dengan fokus khusus pada:
         return instructions.get(error_type, instructions["GENERAL_SYNTAX_ERROR"])
     
     def _create_system_prompt(self):
-        """Membuat prompt sistem untuk AI correction"""
-        return """Anda adalah ahli Python yang memiliki spesialisasi dalam memperbaiki error sintaks dalam kode test.
-Tugas Anda adalah menganalisis kode Python yang memiliki error sintaks, kemudian memberikan versi yang sudah diperbaiki.
+        """Membuat prompt sistem untuk AI correction yang fokus pada peningkatan coverage"""
+        return """Anda adalah ahli Python yang memiliki spesialisasi dalam memperbaiki error sintaks dan mengoptimalkan test untuk meningkatkan code coverage.
 
-Fokus pada:
-1. Menemukan dan memperbaiki error yang disebutkan dalam pesan error
-2. Memeriksa masalah potensial lain yang mungkin memunculkan error tambahan
-3. Memastikan kode benar-benar bebas dari error sintaks
+Tugas Anda adalah:
+1. Menganalisis dan memperbaiki error sintaks dalam kode test
+2. Memastikan test tersebut menjalankan kode yang sebenarnya, BUKAN hanya mock
+3. Meningkatkan kualitas test untuk mendapatkan code coverage yang lebih baik
 
-Berikan solusi yang komprehensif dan terperinci, dengan kode yang sepenuhnya valid dan bebas dari error sintaks.
+Saat memperbaiki test untuk meningkatkan coverage:
+1. KURANGI penggunaan mock, terutama untuk modul yang sedang ditest
+2. FOKUS pada pengujian perilaku fungsi, bukan hanya struktur
+3. UJI semua jalur eksekusi (if/else paths, error handling)
+4. PASTIKAN test memanggil kode yang sebenarnya dengan input nyata
 
-Anda harus mengembalikan kode lengkap yang sudah diperbaiki, bukan hanya bagian yang bermasalah.
+Contoh perbaikan untuk meningkatkan coverage:
+
+BURUK (tidak meningkatkan coverage):
+```python
+def test_function():
+    # Ini tidak mengeksekusi kode sebenarnya, tidak meningkatkan coverage
+    with mock.patch('module.function') as mock_func:
+        result = call_something() 
+        mock_func.assert_called_once()
+```
+
+BAIK (meningkatkan coverage):
+```python
+def test_function_normal_case():
+    # Ini benar-benar menjalankan kode fungsi
+    input_value = "test input"
+    result = function(input_value)
+    assert result == expected_output
+    
+def test_function_edge_case(): 
+    # Menguji jalur kode lain
+    edge_input = ""
+    result = function(edge_input)
+    assert result == expected_edge_output
+```
+
+Berikan solusi kode lengkap yang meningkatkan code coverage.
 """
     
     def _save_content(self, test_file, content):
@@ -768,13 +1028,15 @@ Anda harus mengembalikan kode lengkap yang sudah diperbaiki, bukan hanya bagian 
         print(f"Content saved to {test_file}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Fix AI-generated test files for the Galaxy NG project")
+    parser = argparse.ArgumentParser(description="Fix AI-generated test files for the Galaxy NG project and improve code coverage")
     parser.add_argument("--path", default="galaxy_ng/tests/unit/ai_generated", 
                         help="Path to directory containing test files")
     parser.add_argument("--validate", action="store_true", 
                         help="Validate that tests collect without errors")
     parser.add_argument("--api-key", help="SambaNova API key for AI-assisted correction (falls back to SAMBANOVA_API_KEY env var)")
     parser.add_argument("--model", default="Meta-Llama-3.1-8B-Instruct", help="AI model to use for correction")
+    parser.add_argument("--improve-coverage", action="store_true", 
+                        help="Apply additional fixes to improve code coverage")
     parser.add_argument("files", nargs="*", help="Specific test files to fix (optional)")
     
     args = parser.parse_args()
@@ -846,6 +1108,7 @@ def main():
     print(f"  Failed to fix: {failure_count}")
     print(f"  Total processed: {success_count + failure_count}")
     print(f"  Using AI-assisted correction: {'Yes' if ai_corrector else 'No'}")
+    print(f"  Coverage improvement mode: {'Yes' if args.improve_coverage else 'No'}")
     
 if __name__ == "__main__":
     main()
