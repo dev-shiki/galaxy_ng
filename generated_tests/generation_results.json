@@ -1,0 +1,27 @@
+[
+  {
+    "filename": "social/__init__.py",
+    "status": "error",
+    "message": "AI generation failed"
+  },
+  {
+    "filename": "app/utils/galaxy.py",
+    "status": "error",
+    "message": "AI generation failed"
+  },
+  {
+    "filename": "app/utils/roles.py",
+    "status": "error",
+    "message": "AI generation failed"
+  },
+  {
+    "filename": "app/access_control/access_policy.py",
+    "status": "error",
+    "message": "AI generation failed"
+  },
+  {
+    "filename": "app/management/commands/sync_galaxy_collections.py",
+    "status": "error",
+    "message": "AI generation failed"
+  }
+]
