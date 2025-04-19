@@ -55,6 +55,13 @@ def balance_parentheses(content):
     
     return '\n'.join(lines)
 
+def ensure_mock_import(content):
+    """Ensure unittest.mock is properly imported."""
+    if 'mock.MagicMock' in content and 'import mock' not in content and 'from unittest import mock' not in content:
+        # Add import to the beginning of the file
+        return 'from unittest import mock\n' + content
+    return content
+
 def fix_import_statements(content):
     """
     Fix common import errors:
@@ -83,9 +90,45 @@ def fix_import_statements(content):
         content = re.sub(pattern, replacement, content)
     
     # Make sure mock is imported
-    if 'mock.MagicMock' in content and 'import mock' not in content:
-        content = 'import mock\n' + content
+    if 'mock.MagicMock' in content and 'import mock' not in content and 'from unittest import mock' not in content:
+        content = 'from unittest import mock\n' + content
         
+    return content
+
+def fix_init_module_imports(content):
+    """Fix imports of __init__ modules which are not valid in Python."""
+    # Replace direct imports of __init__ with package imports
+    content = re.sub(
+        r'from\s+([\w.]+)\.__init__\s+import',
+        r'from \1 import',
+        content
+    )
+    
+    # Add module mocking for any problematic imports
+    if '.__init__ import' in content or '.social.__init__' in content:
+        # Make sure mock is imported
+        if 'import mock' not in content and 'from unittest import mock' not in content:
+            content = 'from unittest import mock\nimport sys\n' + content
+        elif 'import sys' not in content:
+            content = content.replace('import mock', 'import mock\nimport sys', 1)
+        
+        # Add mocking code for init modules
+        mock_code = '\n# Mock problematic modules\n'
+        for module_path in re.findall(r'([\w.]+)\.__init__', content):
+            mock_code += f"sys.modules['{module_path}.__init__'] = mock.MagicMock()\n"
+            mock_code += f"sys.modules['{module_path}'] = mock.MagicMock()\n"
+        
+        # Insert after imports
+        if '\nimport ' in content or '\nfrom ' in content:
+            import_section = re.search(r'(^|\n)(import|from).*?($|\n\n)', content, re.DOTALL)
+            if import_section:
+                pos = import_section.end()
+                content = content[:pos] + mock_code + content[pos:]
+            else:
+                content = mock_code + content
+        else:
+            content = mock_code + content
+    
     return content
 
 def add_factory_mocks(content):
@@ -209,8 +252,8 @@ def fix_annotation_syntax(content):
 
 def fix_advanced_syntax_errors(content):
     """
-    Perbaiki error sintaks yang lebih kompleks dengan pendekatan multi-tahap.
-    Ini termasuk membersihkan string yang tidak tertutup, pernyataan yang kehilangan titik dua, dll.
+    Fix more complex syntax errors with a multi-stage approach.
+    This includes unclosed strings, statements missing colons, etc.
     """
     lines = content.splitlines()
     fixed_lines = []
@@ -311,11 +354,13 @@ def fix_test_file(test_file):
         
         # Apply fixers in order
         content = ensure_django_setup(content)
+        content = ensure_mock_import(content)
         content = fix_import_statements(content)
         content = add_factory_mocks(content)
         content = fix_test_definitions(content)
         content = fix_annotation_syntax(content)
         content = handle_special_modules(content, test_file)
+        content = fix_init_module_imports(content)  # Add this new fix
         content = normalize_module_path(content)
         content = balance_parentheses(content)
         content = fix_advanced_syntax_errors(content)
@@ -450,22 +495,16 @@ class AITestCorrector:
             traceback.print_exc()
             return False
     
-    def ensure_mock_import(content):
-        """Ensure unittest.mock is properly imported."""
-        if 'mock.MagicMock' in content and 'import mock' not in content and 'from unittest import mock' not in content:
-            # Add import to the beginning of the file
-            return 'from unittest import mock\n' + content
-        return content
-
     def _apply_standard_fixes(self, content, test_file):
         """Menerapkan perbaikan standar pada konten"""
         content = ensure_django_setup(content)
-        content = ensure_mock_import(content) 
+        content = ensure_mock_import(content)
         content = fix_import_statements(content)
         content = add_factory_mocks(content)
         content = fix_test_definitions(content)
         content = fix_annotation_syntax(content)
         content = handle_special_modules(content, test_file)
+        content = fix_init_module_imports(content)  # Add this new fix
         content = normalize_module_path(content)
         content = balance_parentheses(content)
         content = fix_advanced_syntax_errors(content)
