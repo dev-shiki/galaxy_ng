@@ -55,6 +55,43 @@ def balance_parentheses(content):
     
     return '\n'.join(lines)
 
+# Tambahkan di bagian fix functions
+def ensure_imports_order(content):
+    """
+    Ensure imports are properly ordered - particularly unittest.mock must be imported before use.
+    This is a general fix that can handle various test files.
+    """
+    # Check if mock is used before imported
+    if 'mock.' in content and ('from unittest import mock' not in content.split('mock.')[0] and 
+                               'import mock' not in content.split('mock.')[0]):
+        # Add mock import at the very beginning
+        content = 'from unittest import mock\nimport sys\n' + content
+        
+        # Remove any duplicate imports later in the file
+        content = re.sub(r'(\n)from unittest import mock(\n)', r'\1\2', content)
+        content = re.sub(r'(\n)import mock(\n)', r'\1\2', content)
+    
+    # Check for other common import issues
+    if 'import os' not in content and 'os.' in content:
+        content = 'import os\n' + content
+    
+    if 'import sys' not in content and 'sys.' in content:
+        content = 'import sys\n' + content
+    
+    # Clean up duplicate imports
+    imports_seen = set()
+    lines = content.splitlines()
+    cleaned_lines = []
+    
+    for line in lines:
+        if line.startswith('import ') or line.startswith('from '):
+            if line in imports_seen:
+                continue
+            imports_seen.add(line)
+        cleaned_lines.append(line)
+    
+    return '\n'.join(cleaned_lines)
+
 def ensure_mock_import(content):
     """Ensure unittest.mock is properly imported."""
     if 'mock.MagicMock' in content and 'import mock' not in content and 'from unittest import mock' not in content:
@@ -352,15 +389,15 @@ def fix_test_file(test_file):
         with open(test_file, 'r', encoding='utf-8') as f:
             content = f.read()
         
-        # Apply fixers in order
-        content = ensure_django_setup(content)
-        content = ensure_mock_import(content)
+         # Apply fixers in order - ensure imports are fixed first!
+        content = ensure_imports_order(content)  # Fix imports first
+        content = ensure_mock_import(content)    # Then ensure mock is available
         content = fix_import_statements(content)
         content = add_factory_mocks(content)
         content = fix_test_definitions(content)
         content = fix_annotation_syntax(content)
         content = handle_special_modules(content, test_file)
-        content = fix_init_module_imports(content)  # Add this new fix
+        content = fix_init_module_imports(content)
         content = normalize_module_path(content)
         content = balance_parentheses(content)
         content = fix_advanced_syntax_errors(content)
@@ -497,14 +534,14 @@ class AITestCorrector:
     
     def _apply_standard_fixes(self, content, test_file):
         """Menerapkan perbaikan standar pada konten"""
-        content = ensure_django_setup(content)
+        content = ensure_imports_order(content)  # Fix imports first
         content = ensure_mock_import(content)
         content = fix_import_statements(content)
         content = add_factory_mocks(content)
         content = fix_test_definitions(content)
         content = fix_annotation_syntax(content)
         content = handle_special_modules(content, test_file)
-        content = fix_init_module_imports(content)  # Add this new fix
+        content = fix_init_module_imports(content)
         content = normalize_module_path(content)
         content = balance_parentheses(content)
         content = fix_advanced_syntax_errors(content)
