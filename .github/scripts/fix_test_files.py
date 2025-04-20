@@ -61,10 +61,9 @@ def normalize_indentation(content):
     
     return '\n'.join(fixed_lines)
 
-def fix_missing_blocks(content):
+def fix_missing_code_blocks(content):
     """
-    Fix missing code blocks after function definitions, if statements, etc.
-    Add a 'pass' statement if a block is expected but missing.
+    Find function definitions without code blocks and add a 'pass' statement.
     """
     lines = content.splitlines()
     fixed_lines = []
@@ -74,13 +73,27 @@ def fix_missing_blocks(content):
         line = lines[i]
         fixed_lines.append(line)
         
-        # Check if line should have a block after it
-        if line.rstrip().endswith(':'):
-            # Check if next line exists and is indented
-            if i == len(lines) - 1 or not (i+1 < len(lines) and lines[i+1].startswith(' ')):
-                # We need to add a pass statement
+        # If this is a function definition ending with :
+        if re.match(r'\s*def\s+\w+\s*\(.*\)\s*:\s*$', line):
+            # Check if next line exists and is properly indented
+            if i == len(lines) - 1:
+                # Last line, add a pass statement
                 indent = len(line) - len(line.lstrip()) + 4
                 fixed_lines.append(' ' * indent + 'pass')
+            elif i < len(lines) - 1 and not lines[i+1].strip():
+                # Next line is empty, insert a pass statement
+                indent = len(line) - len(line.lstrip()) + 4
+                fixed_lines.append(' ' * indent + 'pass')
+            elif i < len(lines) - 1:
+                # Check if next line is properly indented
+                next_line = lines[i+1]
+                current_indent = len(line) - len(line.lstrip())
+                next_indent = len(next_line) - len(next_line.lstrip())
+                
+                if next_indent <= current_indent:
+                    # Next line is not indented enough, add a pass
+                    indent = current_indent + 4
+                    fixed_lines.append(' ' * indent + 'pass')
         
         i += 1
     
@@ -119,38 +132,39 @@ def balance_parentheses_better(content):
     return content
 
 # Basic fix functions
-def balance_parentheses(content):
+def balance_parentheses_aggressive(content):
     """
-    Automatically balance parentheses, brackets, and braces in code.
-    Uses a stack-based approach to detect and fix mismatches.
+    Super-aggressive parentheses balancer that works regardless of context.
+    This is a last-resort fix for badly broken Python syntax.
     """
-    lines = content.splitlines()
-    stack = []
+    # First count total parentheses
+    paren_count = content.count('(') - content.count(')')
+    bracket_count = content.count('[') - content.count(']')
+    brace_count = content.count('{') - content.count('}')
     
-    # Track all brackets
-    for i, line in enumerate(lines):
-        for j, char in enumerate(line):
-            if char in '({[':
-                stack.append((char, i))
-            elif char in ')}]':
-                if stack and ((char == ')' and stack[-1][0] == '(') or
-                              (char == '}' and stack[-1][0] == '{') or
-                              (char == ']' and stack[-1][0] == '[')):
-                    stack.pop()
+    # Add missing closing parentheses
+    if paren_count > 0:
+        content += '\n# Fixed unbalanced parentheses\n' + ')' * paren_count
     
-    # Add missing closing brackets
-    if stack:
-        closing = {'(': ')', '{': '}', '[': ']'}
-        line_fixes = {}
-        
-        for bracket, line_num in stack:
-            line_fixes.setdefault(line_num, []).append(closing[bracket])
-        
-        # Apply fixes in reverse order to avoid affecting line numbers
-        for line_num, closers in sorted(line_fixes.items(), reverse=True):
-            lines[line_num] = lines[line_num] + ''.join(closers)
+    # Add missing opening parentheses
+    if paren_count < 0:
+        content = '(' * abs(paren_count) + '\n# Fixed unbalanced parentheses\n' + content
     
-    return '\n'.join(lines)
+    # Do the same for brackets
+    if bracket_count > 0:
+        content += '\n# Fixed unbalanced brackets\n' + ']' * bracket_count
+    
+    if bracket_count < 0:
+        content = '[' * abs(bracket_count) + '\n# Fixed unbalanced brackets\n' + content
+    
+    # And braces
+    if brace_count > 0:
+        content += '\n# Fixed unbalanced braces\n' + '}' * brace_count
+    
+    if brace_count < 0:
+        content = '{' * abs(brace_count) + '\n# Fixed unbalanced braces\n' + content
+    
+    return content
 
 def ensure_mock_import(content):
     """Ensure unittest.mock is properly imported."""
@@ -386,12 +400,9 @@ sys.modules['galaxy_ng.social.auth'] = auth_module
 
 def ensure_django_setup(content):
     """Ensure proper Django setup is included in the test file."""
-    django_setup = "django.setup()"
-    if django_setup not in content:
-        setup_code = '''
+    django_setup_code = '''
 import os
 import sys
-import re
 import pytest
 from unittest import mock
 
@@ -407,7 +418,31 @@ django.setup()
 # Use pytest marks for Django database handling
 pytestmark = pytest.mark.django_db
 '''
-        content = setup_code + content
+    
+    # Check if django.setup() is completely missing
+    if 'django.setup()' not in content:
+        # Find the first import statement to insert after
+        lines = content.splitlines()
+        import_pos = 0
+        for i, line in enumerate(lines):
+            if line.startswith('import ') or line.startswith('from '):
+                import_pos = i
+                break
+        
+        # Insert Django setup after the imports
+        if import_pos > 0:
+            # Add after last import
+            for i in range(import_pos+1, len(lines)):
+                if not (lines[i].startswith('import ') or lines[i].startswith('from ')):
+                    lines.insert(i, django_setup_code)
+                    break
+            else:
+                lines.insert(import_pos+1, django_setup_code)
+        else:
+            # No imports found, add at beginning
+            lines.insert(0, django_setup_code)
+        
+        content = '\n'.join(lines)
     
     return content
 
@@ -849,27 +884,29 @@ class AITestCorrector:
             return False
     
     def _apply_standard_fixes(self, content, test_file):
-        """Menerapkan perbaikan standar pada konten"""
+        """Improved standard fixes with more aggressive syntax correction."""
         # Extract module path from test file
         module_path = test_file.replace('test_', '').replace('.py', '') 
         if '/ai_generated/' in test_file:
             module_path = test_file.replace('/ai_generated/test_', '/').replace('.py', '')
         
-        content = ensure_imports_order(content)  # Fix imports first
+        # First, apply Django setup fix - this should be first to ensure it's included
+        content = ensure_django_setup(content)
+        
+        # Then apply existing fixes
+        content = ensure_imports_order(content)
         content = ensure_mock_import(content)
         content = fix_import_statements(content)
         content = add_factory_mocks(content)
         content = fix_test_definitions(content)
         content = fix_annotation_syntax(content)
-        content = fix_django_setup(content)
         content = handle_special_modules(content, test_file)
         content = fix_init_module_imports(content)
         content = normalize_module_path(content)
-
-        # Apply new, more aggressive fixes
-        content = normalize_indentation(content)  # Replace balance_parentheses with this
-        content = balance_parentheses_better(content)  # More aggressive parentheses balancing
-        content = fix_missing_blocks(content)  # Fix missing code blocks
+        
+        # Now apply the new aggressive fixes
+        content = fix_missing_code_blocks(content)  # Fix missing code blocks
+        content = balance_parentheses_aggressive(content)  # Super aggressive parentheses fix
         content = fix_advanced_syntax_errors(content)
         content = fix_comment_separated_function_names(content)
         
