@@ -21,6 +21,103 @@ MAX_CORRECTION_ATTEMPTS = 3
 REQUEST_TIMEOUT = 60  # seconds
 API_ENDPOINT = "https://api.sambanova.ai/v1/chat/completions"
 
+def normalize_indentation(content):
+    """
+    Fix indentation issues by normalizing to 4 spaces consistently.
+    This is more reliable than trying to interpret the AI's intended indentation.
+    """
+    lines = content.splitlines()
+    fixed_lines = []
+    current_indent = 0
+    
+    # Stack to track indentation levels
+    indent_stack = [0]
+    
+    for i, line in enumerate(lines):
+        # Skip empty lines
+        if not line.strip():
+            fixed_lines.append('')
+            continue
+        
+        # Get current line indentation
+        stripped_line = line.lstrip()
+        
+        # Check if this line should decrease indentation
+        if stripped_line.startswith(('elif', 'else:', 'except', 'finally:', 'except:')):
+            if len(indent_stack) > 1:
+                # Pop indent but keep at least one level
+                indent_stack.pop()
+            current_indent = indent_stack[-1]
+        
+        # Apply current indentation
+        fixed_line = ' ' * current_indent + stripped_line
+        fixed_lines.append(fixed_line)
+        
+        # Check if next line should be indented
+        if stripped_line.endswith(':'):
+            # Save current indent level
+            indent_stack.append(current_indent + 4)
+            current_indent = indent_stack[-1]
+    
+    return '\n'.join(fixed_lines)
+
+def fix_missing_blocks(content):
+    """
+    Fix missing code blocks after function definitions, if statements, etc.
+    Add a 'pass' statement if a block is expected but missing.
+    """
+    lines = content.splitlines()
+    fixed_lines = []
+    
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        fixed_lines.append(line)
+        
+        # Check if line should have a block after it
+        if line.rstrip().endswith(':'):
+            # Check if next line exists and is indented
+            if i == len(lines) - 1 or not (i+1 < len(lines) and lines[i+1].startswith(' ')):
+                # We need to add a pass statement
+                indent = len(line) - len(line.lstrip()) + 4
+                fixed_lines.append(' ' * indent + 'pass')
+        
+        i += 1
+    
+    return '\n'.join(fixed_lines)
+
+def balance_parentheses_better(content):
+    """
+    More aggressive attempt to balance parentheses, brackets, and braces.
+    This is a common issue in AI-generated code.
+    """
+    open_chars = ['(', '[', '{']
+    close_chars = [')', ']', '}']
+    pairs = {'(': ')', '[': ']', '{': '}'}
+    
+    # Count imbalance across the entire content
+    counts = {'(': 0, '[': 0, '{': 0}
+    
+    for char in content:
+        if char in open_chars:
+            counts[char] += 1
+        elif char in close_chars:
+            for open_char in open_chars:
+                if pairs[open_char] == char:
+                    counts[open_char] = max(0, counts[open_char] - 1)
+    
+    # Add missing closing characters at the end
+    if any(counts.values()):
+        closing = ''
+        for char, count in counts.items():
+            closing += pairs[char] * count
+        
+        if closing:
+            # Add to the end of the content
+            content += '\n# Auto-balancing parentheses\n' + closing
+    
+    return content
+
 # Basic fix functions
 def balance_parentheses(content):
     """
@@ -768,7 +865,11 @@ class AITestCorrector:
         content = handle_special_modules(content, test_file)
         content = fix_init_module_imports(content)
         content = normalize_module_path(content)
-        content = balance_parentheses(content)
+
+        # Apply new, more aggressive fixes
+        content = normalize_indentation(content)  # Replace balance_parentheses with this
+        content = balance_parentheses_better(content)  # More aggressive parentheses balancing
+        content = fix_missing_blocks(content)  # Fix missing code blocks
         content = fix_advanced_syntax_errors(content)
         content = fix_comment_separated_function_names(content)
         
