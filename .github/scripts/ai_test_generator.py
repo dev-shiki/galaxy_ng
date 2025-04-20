@@ -16,7 +16,7 @@ import traceback
 from pathlib import Path
 
 # Constants
-MAX_RETRIES = 3
+MAX_RETRIES = 5
 RETRY_DELAY = 2  # seconds
 REQUEST_TIMEOUT = 60  # seconds
 
