@@ -525,6 +525,8 @@ def validate_and_fix_test(test_content, module_path):
     
     # Apply fixes in sequence
     fixed_content = test_content
+
+    module_import_path = get_module_import_path(module_path)
     
     # 1. Fix import paths (replace hyphens with underscores)
     fixed_content = re.sub(
@@ -558,19 +560,17 @@ def validate_and_fix_test(test_content, module_path):
     # 7. Fix advanced syntax errors
     fixed_content = fix_advanced_syntax_errors(fixed_content)
     
-    # 8. Make sure module is imported
-    module_import_path = get_module_import_path(module_path)
     if module_import_path not in fixed_content:
         import_statement = f"\n# Import module being tested\ntry:\n    from {module_import_path} import *\nexcept (ImportError, ModuleNotFoundError):\n    # Mock module if import fails\n    sys.modules['{module_import_path}'] = mock.MagicMock()\n\n"
         if 'import pytest' in fixed_content:
             fixed_content = fixed_content.replace('import pytest', 'import pytest\nimport sys' + import_statement)
         else:
             # Add at the top after environment setup
-            fixed_content = create_test_template(module_path) + fixed_content
+            fixed_content = create_test_template(module_path, module_import_path) + fixed_content
     
     # 9. Ensure django.setup() is included
     if 'django.setup()' not in fixed_content:
-        fixed_content = create_test_template(module_path) + fixed_content
+        fixed_content = create_test_template(module_path, module_import_path) + fixed_content
     
     # 10. Verify syntax with ast parse
     try:
